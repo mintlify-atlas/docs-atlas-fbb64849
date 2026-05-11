@@ -1,0 +1,164 @@
+---
+title: "Connecting to Podman: sockets, TCP, and named connections"
+description: "Configure podman-ts to connect via Unix socket, TCP, or named connections from containers.conf. Includes environment-variable and machine support."
+---
+
+podman-ts supports multiple connection modes — local Unix sockets, TCP endpoints, and named connections defined in `containers.conf` or `podman-connections.json`. This page explains each mode with examples and describes how environment variables and Podman machines are handled.
+
+## Unix socket (default)
+
+When you create a `PodmanClient` with no arguments, it connects over a Unix domain socket. The socket path depends on whether the process is running as root or as a regular user.
+
+| User | Default socket path |
+|---|---|
+| Root (`uid = 0`) | `/run/podman/podman.sock` |
+| Rootless | `$XDG_RUNTIME_DIR/podman/podman.sock` (falls back to `/run/user/{uid}/podman/podman.sock`) |
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+// Connects to the local Unix socket automatically
+const client = new PodmanClient();
+```
+
+You can also specify the socket path explicitly using the `http+unix://` scheme:
+
+```typescript
+const client = new PodmanClient({
+  baseUrl: "http+unix:///run/user/1000/podman/podman.sock",
+});
+```
+
+## TCP connection
+
+Connect to a Podman service listening on a TCP port by passing an `http://` or `tcp://` URL. The `tcp://` scheme is automatically mapped to `http://` internally.
+
+```typescript
+// Using http://
+const client = new PodmanClient({
+  baseUrl: "http://192.168.1.100:8080",
+});
+
+// Using tcp:// — equivalent to http://
+const client = new PodmanClient({
+  baseUrl: "tcp://192.168.1.100:8080",
+});
+```
+
+<Warning>
+  Only connect to Podman over TCP on trusted, private networks. The Podman socket does not provide authentication on its own, so a publicly reachable TCP endpoint is a security risk.
+</Warning>
+
+## Named connections
+
+podman-ts can look up a named connection from your Podman configuration files. Pass the connection name to the `connection` option:
+
+```typescript
+const client = new PodmanClient({
+  connection: "my-remote-machine",
+});
+```
+
+The SDK resolves the URL through `PodmanConfig`, which reads configuration from these files (in order):
+
+1. `$XDG_CONFIG_HOME/containers/podman-connections.json` (new JSON format, takes precedence)
+2. `$XDG_CONFIG_HOME/containers/containers.conf` (legacy TOML format)
+
+`XDG_CONFIG_HOME` defaults to `~/.config` when not set.
+
+The JSON file uses the `Connection.Connections` structure; the TOML file uses `engine.service_destinations`. Both formats are merged, with the JSON format taking precedence for overlapping names.
+
+```typescript
+// List available connections by reading PodmanConfig directly
+import { PodmanConfig } from "@pratyay360/podman-ts";
+
+const config = new PodmanConfig();
+console.log(Object.keys(config.services));
+// e.g. ["default-machine", "my-remote-machine"]
+```
+
+If the connection name is not found in any configuration file, the constructor throws immediately with a descriptive error.
+
+## Environment variables
+
+`new PodmanClient()` does **not** read `CONTAINER_HOST` or `DOCKER_HOST`. Use `PodmanClient.fromEnv()` or the `fromEnv()` shorthand when you want the connection URL to come from the environment:
+
+```typescript
+import { fromEnv, PodmanClient } from "@pratyay360/podman-ts";
+
+// Reads CONTAINER_HOST, then DOCKER_HOST, then falls back to local socket
+const client = fromEnv();
+
+// Equivalent static method
+const same = PodmanClient.fromEnv();
+
+// You can pass extra options (but not baseUrl, which comes from env)
+const client = PodmanClient.fromEnv({ timeout: 5000 });
+```
+
+The resolution order inside `fromEnv()`:
+
+1. `CONTAINER_HOST` — if set, use its value as `baseUrl`
+2. `DOCKER_HOST` — if set, use its value as `baseUrl`
+3. Local Unix socket — same default path used by `new PodmanClient()`
+
+## Podman machine
+
+If you have a Podman machine running and it is the active service, `new PodmanClient()` uses the machine's URL automatically — no configuration needed.
+
+`PodmanConfig` checks the `Default` key (JSON) or `active_service` key (TOML) in the connection config. If the active entry has `IsMachine: true`, its URL is used in place of the local socket.
+
+```typescript
+// If a Podman machine is active, this connects to it automatically
+const client = new PodmanClient();
+
+// To check what the active service resolves to:
+import { PodmanConfig } from "@pratyay360/podman-ts";
+
+const config = new PodmanConfig();
+console.log(config.activeService?.url.toString());
+```
+
+## SSH connections
+
+`ssh://` and `http+ssh://` URLs are **not** directly supported. Attempting to use them throws a clear error:
+
+```
+SSH connections require an SSH tunnel.
+Set up the tunnel first and connect via tcp:// or http+unix://.
+```
+
+To connect to a remote Podman socket over SSH, create an SSH tunnel first and then point podman-ts at the forwarded endpoint:
+
+```bash
+# Forward the remote socket to a local TCP port
+ssh -L 8080:/run/user/1000/podman/podman.sock user@remote-host -N
+```
+
+```typescript
+// Connect through the tunnel
+const client = new PodmanClient({
+  baseUrl: "tcp://127.0.0.1:8080",
+});
+```
+
+Alternatively, forward the socket to a local path and use `http+unix://`:
+
+```bash
+ssh -L /tmp/podman-remote.sock:/run/user/1000/podman/podman.sock user@remote-host -N
+```
+
+```typescript
+const client = new PodmanClient({
+  baseUrl: "http+unix:///tmp/podman-remote.sock",
+});
+```
+
+## URL scheme reference
+
+| Scheme | Example | Behavior |
+|---|---|---|
+| `http+unix://` | `http+unix:///run/podman/podman.sock` | Connects over a Unix domain socket. The path after `://` is the socket file path. |
+| `http://` | `http://192.168.1.100:8080` | Standard HTTP over TCP. |
+| `tcp://` | `tcp://192.168.1.100:8080` | Mapped to `http://` internally. |
+| `ssh://` | — | **Not supported.** Use a tunnel with `tcp://` or `http+unix://`. |

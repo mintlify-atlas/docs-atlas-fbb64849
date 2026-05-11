@@ -1,81 +1,123 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Get started with podman-ts"
+description: "Learn how to install podman-ts, connect to a Podman socket, and manage your first container end-to-end in minutes using the TypeScript SDK."
 ---
 
-## Get started in three steps
+This guide walks you through installing podman-ts, establishing a connection to Podman, and running your first container end-to-end — from pulling an image to removing the stopped container.
 
-Get your documentation site running locally and make your first customization.
+<Note>
+  **Prerequisites:** Bun >= 1.0 and a running Podman daemon. Verify with `bun --version` and `podman info`.
+</Note>
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Install the package">
+    Add podman-ts to your project using your preferred package manager.
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    <CodeGroup>
 
-### Step 2: Deploy your changes
+    ```bash npm
+    npm install @pratyay360/podman-ts
+    ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash bun
+    bun add @pratyay360/podman-ts
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    </CodeGroup>
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Connect to Podman">
+    Create a `PodmanClient`. With no arguments, the client resolves the connection automatically.
 
-### Step 3: Go live
+    ```typescript
+    import { PodmanClient } from "@pratyay360/podman-ts";
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    const client = new PodmanClient();
+    ```
+
+    The default resolution order is:
+
+    1. If `connection` is set, the named service from `containers.conf` is used.
+    2. If the active Podman service is a machine, its URL is used.
+    3. Otherwise the local Unix socket is used — `/run/podman/podman.sock` for root, or `$XDG_RUNTIME_DIR/podman/podman.sock` for rootless.
+
+    To connect to a specific URL or use environment variables instead, see [Connecting to Podman](/concepts/connection).
+  </Step>
+
+  <Step title="List containers">
+    Retrieve all containers (including stopped ones) and print their IDs, names, and status.
+
+    ```typescript
+    import { PodmanClient } from "@pratyay360/podman-ts";
+
+    const client = new PodmanClient();
+
+    const containers = await client.containers.list({ all: true });
+    for (const container of containers) {
+      console.log(`${container.id} - ${container.name} (${container.status})`);
+    }
+    ```
+
+    Pass `{ all: false }` (the default) to list only running containers.
+  </Step>
+
+  <Step title="Pull an image">
+    Pull an image from a registry using its full reference. The method returns an `Image` instance with the resolved tags.
+
+    ```typescript
+    import { PodmanClient } from "@pratyay360/podman-ts";
+
+    const client = new PodmanClient();
+
+    const image = await client.images.pull("docker.io/library/nginx:latest");
+    console.log(`Pulled: ${image.tags.join(", ")}`);
+    ```
+  </Step>
+
+  <Step title="Run a container">
+    Create a container, start it, read its logs, then stop and remove it.
+
+    ```typescript
+    import { PodmanClient } from "@pratyay360/podman-ts";
+
+    const client = new PodmanClient();
+
+    // Create the container
+    const container = await client.containers.create({
+      image: "nginx",
+      name: "my-nginx",
+      portMappings: [{ container_port: 80, host_port: 8080 }],
+    });
+
+    // Start it
+    await container.start();
+
+    // Read logs (returns a string by default)
+    const logs = await container.logs();
+    console.log(logs);
+
+    // Stop and clean up
+    await container.stop();
+    await container.remove();
+    ```
+
+    Nginx is now accessible at `http://localhost:8080` while the container is running.
+  </Step>
+</Steps>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="PodmanClient options" icon="gear" href="/concepts/client">
+    Configure the client with a custom URL, named connection, API version, and timeout.
+  </Card>
+  <Card title="Containers" icon="box" href="/resources/containers">
+    Full reference for `client.containers` — create, run, inspect, exec, stream logs, and more.
+  </Card>
+  <Card title="Images" icon="image" href="/resources/images">
+    Pull, push, build, search, and manage images with `client.images`.
+  </Card>
+  <Card title="Error handling" icon="circle-exclamation" href="/concepts/error-handling">
+    Handle typed errors like `ImageNotFound`, `ContainerError`, and `APIError`.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

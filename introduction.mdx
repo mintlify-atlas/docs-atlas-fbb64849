@@ -1,0 +1,67 @@
+---
+title: "podman-ts: TypeScript SDK for Podman's libpod API"
+description: "podman-ts is a type-safe TypeScript/Bun SDK for Podman's libpod REST API, covering containers, images, pods, networks, volumes, secrets, and more."
+---
+
+podman-ts is a high-level, type-safe TypeScript SDK for [Podman's](https://podman.io) libpod REST API. This page explains what the library does, what it covers, and how it fits into the Podman ecosystem.
+
+## What is podman-ts?
+
+[Podman](https://podman.io) is a daemonless, rootless container engine compatible with the OCI standard. It exposes a local HTTP API (libpod) over a Unix socket or TCP, giving you full programmatic control over containers, images, pods, networks, volumes, and more.
+
+podman-ts wraps that API in idiomatic TypeScript. Instead of constructing raw HTTP requests, you work with typed resource managers and object instances — `client.containers.create(...)`, `container.start()`, `container.logs()` — while the SDK handles serialisation, error mapping, and socket communication for you.
+
+The library is built on Bun-native APIs (`Bun.fetch` with Unix socket support, `Bun.spawn` for tar operations) and is intended to run under Bun >= 1.0.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Type-safe TypeScript bindings" icon="shield-check">
+    Every request and response is fully typed. TypeScript catches mismatches at compile time before they reach Podman.
+  </Card>
+  <Card title="Bun-native connections" icon="bolt">
+    Connects over Unix sockets or TCP using Bun's native fetch implementation — no extra HTTP client dependencies.
+  </Card>
+  <Card title="Resource managers" icon="layer-group">
+    Dedicated managers for containers, images, pods, networks, volumes, secrets, manifests, quadlets, events, system, kube, and artifacts.
+  </Card>
+  <Card title="Streaming via async iterators" icon="arrow-right-arrow-left">
+    Streaming logs, events, and other continuous responses are consumed with standard `for await...of` loops.
+  </Card>
+  <Card title="Kubernetes YAML support" icon="file-code">
+    `client.kube` lets you generate Kubernetes YAML from Podman resources and apply YAML manifests directly.
+  </Card>
+  <Card title="Docker-compatible alias" icon="docker">
+    Import `DockerClient` as a drop-in alias for `PodmanClient` when porting code from Docker SDK patterns.
+  </Card>
+  <Card title="Environment-based connection" icon="terminal">
+    Use `fromEnv()` or `PodmanClient.fromEnv()` to resolve the service URL from `CONTAINER_HOST` or `DOCKER_HOST`.
+  </Card>
+  <Card title="Low-level escape hatch" icon="wrench">
+    `client.api` exposes `get`, `post`, `put`, `patch`, `delete`, and `head` for any libpod path not covered by the high-level managers.
+  </Card>
+</CardGroup>
+
+## API coverage
+
+Podman's HTTP surface is large — the full spec lives in the project's `swagger-latest.yaml`. podman-ts implements a curated subset focused on common container workflows.
+
+For operations that are not wrapped yet, use `client.api` directly with libpod paths:
+
+```typescript
+// Call any libpod endpoint not covered by the high-level managers
+const res = await client.api.get("/containers/json", { params: { all: true } });
+res.raiseForStatus();
+
+// Use compatible: true for Docker-compatible (/compat) endpoints
+await client.api.post("/auth", {
+  data: { username: "user", password: "pass" },
+  compatible: true,
+});
+```
+
+The default path prefix is `/v{version}/libpod`. Pass `compatible: true` to target `/v{version}/compat` instead (for example, registry `/auth` used by `system.login`).
+
+## License
+
+podman-ts is released under the [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) license.

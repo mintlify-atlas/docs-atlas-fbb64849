@@ -1,0 +1,120 @@
+---
+title: "Streaming logs and events in podman-ts"
+description: "podman-ts supports async iteration for container logs and system events. Learn how to use stream: true, lineStream, and jsonStream helpers."
+---
+
+podman-ts models streaming responses as async iterables, letting you process data incrementally as it arrives rather than waiting for a complete response. Two parts of the SDK support streaming out of the box: container logs and system events. For custom pipelines, the library also exports `lineStream` and `jsonStream` helper generators.
+
+<Note>
+Streaming relies on Bun-native APIs. Run your application with [Bun](https://bun.sh) (`bun >= 1.0`).
+</Note>
+
+## Streaming container logs
+
+Call `container.logs()` with `{ stream: true }` to receive an `AsyncIterable<string>` instead of a single concatenated string. Add `follow: true` to keep the stream open and receive new log lines as the container writes them.
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+const container = await client.containers.get("my-container");
+
+const logStream = await container.logs({ stream: true, follow: true });
+for await (const chunk of logStream) {
+  process.stdout.write(chunk + "\n");
+}
+```
+
+Without `stream: true`, `container.logs()` resolves to a plain `string` containing the full log output collected up to that point.
+
+## Streaming events
+
+`client.events.list()` is an async generator over the Podman `/events` endpoint. Set `decode: true` to receive parsed objects instead of raw JSON strings:
+
+```typescript
+for await (const line of client.events.list({ decode: true })) {
+  const event = line as Record<string, unknown>;
+  console.log(event["Type"], event["Action"]);
+}
+```
+
+You can scope the stream with `since`, `until`, and `filters`:
+
+```typescript
+for await (const line of client.events.list({
+  decode: true,
+  filters: { type: "container" },
+})) {
+  const event = line as Record<string, unknown>;
+  console.log(event);
+}
+```
+
+There is no separate `stream()` method — `list()` is always a generator.
+
+## `jsonStream` and `lineStream` helpers
+
+Both helpers are exported from `@pratyay360/podman-ts` and operate on any `AsyncIterable<string>` or `Iterable<string>`. Use them when you need to build a custom streaming pipeline on top of `client.api` or any other source that yields text chunks.
+
+### `lineStream`
+
+```typescript
+import { lineStream } from "@pratyay360/podman-ts";
+
+async function* lineStream(stream: AsyncIterable<string>): AsyncGenerator<string>
+```
+
+Splits an incoming text stream on newline boundaries and yields each non-empty line individually. Partial lines accumulating across chunk boundaries are buffered internally until a newline arrives. Any trailing content after the stream closes is flushed as a final line.
+
+```typescript
+import { lineStream } from "@pratyay360/podman-ts";
+
+// rawStream is any AsyncIterable<string>
+for await (const line of lineStream(rawStream)) {
+  console.log(line);
+}
+```
+
+### `jsonStream`
+
+```typescript
+import { jsonStream } from "@pratyay360/podman-ts";
+
+async function* jsonStream(
+  stream: AsyncIterable<string> | Iterable<string>,
+): AsyncGenerator<unknown>
+```
+
+Parses a stream of text chunks that contain concatenated JSON values (the format Podman uses for build output, pull progress, and similar endpoints). It buffers incoming text and yields each complete JSON value as a decoded JavaScript object as soon as it can be parsed. Remaining text that cannot be parsed after the stream closes throws a `StreamParseError`.
+
+```typescript
+import { jsonStream } from "@pratyay360/podman-ts";
+
+for await (const obj of jsonStream(rawStream)) {
+  console.log(obj);
+}
+```
+
+`jsonStream` accepts both sync (`Iterable<string>`) and async (`AsyncIterable<string>`) sources, making it usable in tests with plain arrays as well as in production with live HTTP response bodies.
+
+## Stopping a stream
+
+Use the `timeout` option on `PodmanClient` to apply a global request timeout, or use an `AbortController` if you need programmatic control:
+
+```typescript
+const client = new PodmanClient({ timeout: 30_000 }); // 30 s hard limit
+```
+
+```typescript
+// Break early from the loop to stop consuming the stream
+for await (const line of client.events.list({ decode: true })) {
+  const event = line as Record<string, unknown>;
+  if (event["Action"] === "die") {
+    break; // stop iterating; the generator is abandoned
+  }
+}
+```
+
+<Tip>
+Breaking out of a `for await...of` loop causes the generator to stop yielding, but the underlying HTTP connection may remain open until the server closes it or the process exits. For long-lived programs, prefer a bounded `until` timestamp on `client.events.list()` to let the server close the stream naturally.
+</Tip>

@@ -1,0 +1,136 @@
+---
+title: "APIClient: low-level Podman HTTP client"
+description: "APIClient makes direct HTTP calls to the Podman REST API. Use it for libpod or compat endpoints not covered by the resource managers."
+---
+
+`APIClient` is the low-level HTTP client that sits beneath all resource managers. Normally you access it through `client.api` on a `PodmanClient` instance rather than constructing it directly. Use it when you need to call a Podman REST endpoint that the resource managers do not yet expose.
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+// client.api is an APIClient instance
+const res = await client.api.get("/containers/json", { params: { all: true } });
+res.raiseForStatus();
+const containers = res.data;
+```
+
+## Constructor
+
+```typescript
+new APIClient(options: APIClientOptions): APIClient
+```
+
+<ParamField body="baseUrl" type="string" required>
+  Full URL to the Podman service. Supports `http+unix://`, `unix://`, `tcp://`, and plain `http://`/`https://` URLs.
+</ParamField>
+
+<ParamField body="version" type="string">
+  API version prefix used in every URL. Default: `"v5.0.0"`.
+</ParamField>
+
+<ParamField body="timeout" type="number">
+  Request timeout in milliseconds applied via `AbortSignal.timeout()`. When omitted, no timeout is set.
+</ParamField>
+
+<ParamField body="retries" type="number">
+  Maximum number of retry attempts on network-level errors. Uses exponential back-off starting at 100 ms, capped at 2 000 ms. Default: `0`.
+</ParamField>
+
+## URL construction
+
+Every request URL is built as:
+
+```
+{httpBase}/v{version}/{prefix}{path}{query}
+```
+
+- **libpod** (default): prefix is `libpod` → `/v5.0.0/libpod/containers/json`
+- **compat**: prefix is `compat` → `/v5.0.0/compat/containers/json` — set `compatible: true` in `RequestConfig`.
+
+Unix socket URLs (`http+unix://…`) are resolved automatically using Bun's native `unix` fetch option.
+
+## HTTP methods
+
+All methods accept a `path` (relative to the prefix) and an optional `RequestConfig`, and return `Promise<APIResponse<T>>`.
+
+| Method | Signature |
+|---|---|
+| `get` | `get<T>(path: string, config?: RequestConfig): Promise<APIResponse<T>>` |
+| `post` | `post<T>(path: string, config?: RequestConfig): Promise<APIResponse<T>>` |
+| `put` | `put<T>(path: string, config?: RequestConfig): Promise<APIResponse<T>>` |
+| `patch` | `patch<T>(path: string, config?: RequestConfig): Promise<APIResponse<T>>` |
+| `delete` | `delete<T>(path: string, config?: RequestConfig): Promise<APIResponse<T>>` |
+| `head` | `head(path: string, config?: RequestConfig): Promise<APIResponse>` |
+| `options` | `options<T>(path: string, config?: RequestConfig): Promise<APIResponse<T>>` |
+
+## RequestConfig
+
+Passed as the second argument to any HTTP method.
+
+<ParamField body="params" type="Record<string, unknown>">
+  Query string parameters. `null` and `undefined` values are dropped. Arrays are expanded to repeated keys.
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Additional HTTP headers to merge into the request.
+</ParamField>
+
+<ParamField body="data" type="unknown">
+  Request body. Accepts plain objects (serialized to JSON), strings, `ArrayBuffer`, `Uint8Array`, `Blob`, `Buffer`, and `FormData`. The `Content-Type` header is set automatically based on the type.
+</ParamField>
+
+<ParamField body="compatible" type="boolean">
+  When `true`, uses the Docker-compat URL prefix (`/compat`) instead of the libpod prefix (`/libpod`). Default: `false`.
+</ParamField>
+
+<ParamField body="parseAs" type='"json" | "text" | "arraybuffer"'>
+  Controls how the response body is read. When omitted, the client reads the `Content-Type` response header and uses JSON for `application/json`, otherwise text.
+</ParamField>
+
+## APIResponse\<T\>
+
+Wraps the HTTP response returned by every request method.
+
+| Member | Type | Description |
+|---|---|---|
+| `status` | `number` | HTTP status code. |
+| `ok` | `boolean` | `true` when `status` is 200–299. |
+| `data` | `T` | Parsed response body. |
+| `raiseForStatus(NotFoundClass?)` | `void` | Throws an `APIError` (or `NotFound` subclass) when `status >= 400`. Pass a custom `NotFoundClass` to override the error thrown for 404 responses. |
+
+## rawRequest
+
+```typescript
+rawRequest(method: string, path: string, config?: RequestConfig): Promise<Response>
+```
+
+Sends a request and returns the raw `Response` object without reading or parsing the body. Use this for attach, exec, or other streaming/hijacked connections where you need access to the raw `ReadableStream`.
+
+```typescript
+const response = await client.api.rawRequest("POST", "/containers/mycontainer/attach", {
+  params: { stream: true, stdout: true, stderr: true },
+});
+const reader = response.body?.getReader();
+```
+
+## Code examples
+
+```typescript
+// libpod endpoint (default)
+const res = await client.api.get("/containers/json", { params: { all: true } });
+res.raiseForStatus();
+const containers = res.data;
+
+// compat endpoint
+const res2 = await client.api.post("/auth", {
+  compatible: true,
+  data: {
+    username: "user",
+    password: "pass",
+    serveraddress: "registry.example.com",
+  },
+});
+res2.raiseForStatus();
+```

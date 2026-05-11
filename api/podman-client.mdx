@@ -1,0 +1,138 @@
+---
+title: "PodmanClient API reference"
+description: "Complete API reference for PodmanClient — the main entry point in podman-ts. Covers constructor options, resource managers, and factory methods."
+---
+
+`PodmanClient` is the top-level entry point for the podman-ts SDK. It holds a lazily-initialized set of resource managers and a public `api` property that exposes the underlying `APIClient` for raw HTTP calls. You create one instance per application and reuse it across requests.
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+const containers = await client.containers.list({ all: true });
+await client.close();
+```
+
+## Constructor
+
+```typescript
+new PodmanClient(options?: PodmanClientOptions): PodmanClient
+```
+
+Creates a new client. When no `baseUrl` or `connection` is provided, the client reads the active service from `containers.conf`. If the active service is a Podman machine, its URL is used; otherwise the local Unix socket is used.
+
+<ParamField body="baseUrl" type="string">
+  Full URL to the Podman service, e.g. `"http+unix:///run/podman/podman.sock"` or `"tcp://127.0.0.1:8080"`. When set, `connection` is ignored.
+</ParamField>
+
+<ParamField body="connection" type="string">
+  Named connection from `containers.conf` or `podman-connections.json`. Ignored if `baseUrl` is provided.
+</ParamField>
+
+<ParamField body="version" type="string">
+  API version prefix override. Default: `"v5.0.0"`.
+</ParamField>
+
+<ParamField body="timeout" type="number">
+  Request timeout in milliseconds. When omitted, requests do not time out.
+</ParamField>
+
+<ParamField body="identity" type="string">
+  Path to an SSH identity file. Used when connecting over `ssh://`.
+</ParamField>
+
+## Static factory methods
+
+### PodmanClient.fromEnv
+
+```typescript
+static fromEnv(options?: Omit<PodmanClientOptions, "baseUrl">): PodmanClient
+```
+
+Creates a `PodmanClient` whose base URL is read from the environment. Checks `CONTAINER_HOST`, then `DOCKER_HOST`, then falls back to the local Unix socket.
+
+```typescript
+const client = PodmanClient.fromEnv({ timeout: 5000 });
+```
+
+### fromEnv (exported function)
+
+```typescript
+function fromEnv(options?: Omit<PodmanClientOptions, "baseUrl">): PodmanClient
+```
+
+Module-level shorthand that calls `PodmanClient.fromEnv()`. Mirrors the Python SDK convention.
+
+```typescript
+import { fromEnv } from "@pratyay360/podman-ts";
+
+const client = fromEnv();
+```
+
+## DockerClient alias
+
+```typescript
+export const DockerClient = PodmanClient;
+```
+
+`DockerClient` is a named export that aliases `PodmanClient`. It exists for Docker SDK compatibility and is identical in every way.
+
+## Public property
+
+| Property | Type | Description |
+|---|---|---|
+| `api` | `APIClient` | The underlying low-level HTTP client. Use it to make requests not covered by the resource managers. |
+
+## Resource manager getters
+
+Each getter is lazily initialized — the manager instance is created on first access and reused on subsequent accesses.
+
+| Getter | Type | Description |
+|---|---|---|
+| `containers` | `ContainersManager` | Create, list, inspect, start, stop, remove, and exec into containers. |
+| `images` | `ImagesManager` | Pull, push, build, list, tag, and remove images. |
+| `networks` | `NetworksManager` | Create, list, inspect, connect, and remove networks. |
+| `volumes` | `VolumesManager` | Create, list, inspect, and remove volumes. |
+| `pods` | `PodsManager` | Create, list, inspect, start, stop, and remove pods. |
+| `secrets` | `SecretsManager` | Create, list, inspect, and remove secrets. |
+| `manifests` | `ManifestsManager` | Create and manage image manifest lists. |
+| `quadlets` | `QuadletsManager` | Read and write Quadlet unit files on the host. |
+| `events` | `EventsManager` | Stream or list Podman events. |
+| `system` | `SystemManager` | Ping, version, info, df, and login operations. |
+| `kube` | `KubeManager` | Generate and apply Kubernetes YAML; generate systemd units. |
+| `artifacts` | `ArtifactsManager` | Push, pull, and manage OCI artifacts. |
+
+## Convenience properties
+
+These properties delegate to `SystemManager` and return Promises. They are shorthand for the equivalent `client.system.*()` calls.
+
+| Property | Return type | Equivalent to |
+|---|---|---|
+| `ping` | `Promise<boolean>` | `client.system.ping()` |
+| `version` | `Promise<Record<string, unknown>>` | `client.system.version()` |
+| `info` | `Promise<Record<string, unknown>>` | `client.system.info()` |
+| `df` | `Promise<Record<string, unknown>>` | `client.system.df()` |
+
+## Instance methods
+
+### close
+
+```typescript
+close(): void
+```
+
+Releases any resources held by the client. Currently a no-op because Bun's native fetch does not maintain a persistent connection pool. Call it for forward compatibility or use the `using` declaration below.
+
+### \[Symbol.dispose\]
+
+```typescript
+[Symbol.dispose](): void
+```
+
+Implements the TC39 Explicit Resource Management protocol. Calls `close()` automatically when the client goes out of scope inside a `using` block.
+
+```typescript
+using client = new PodmanClient();
+const info = await client.info;
+// close() is called automatically here
+```

@@ -1,0 +1,251 @@
+---
+title: "Working with OCI manifests"
+description: "Use ManifestsManager to create, inspect, add images to, push, and delete multi-platform OCI manifest lists with the podman-ts TypeScript SDK."
+---
+
+`ManifestsManager` provides access to OCI manifest lists (also called image indexes), which bundle multiple platform-specific images under a single tag. You can create a multi-platform manifest, add images to it, push it to a registry, and remove individual platform entries by digest — all without leaving TypeScript. Access the manager via `client.manifests` on any `PodmanClient` instance.
+
+## ManifestsManager methods
+
+### create
+
+```typescript
+create(name: string, images: Array<Image | string>, all?: boolean): Promise<Manifest>
+```
+
+Create a new manifest list and return a `Manifest` instance. At least one image reference must be provided; passing an empty array throws a `TypeError`.
+
+<ParamField body="name" type="string" required>
+  Name for the manifest list (e.g. `"registry.example.com/myapp:latest"`).
+</ParamField>
+
+<ParamField body="images" type="Array<Image | string>" required>
+  One or more image references to seed the manifest. Each entry may be an `Image` instance or a plain string reference.
+</ParamField>
+
+<ParamField body="all" type="boolean">
+  When `true`, include all images from a multi-arch source rather than only the current platform's image.
+</ParamField>
+
+---
+
+### get
+
+```typescript
+get(key: string): Promise<Manifest>
+```
+
+Fetch an existing manifest list by name or ID. Throws `NotFound` if no manifest with that name exists.
+
+---
+
+### exists
+
+```typescript
+exists(key: string): Promise<boolean>
+```
+
+Return `true` if a manifest list with the given name exists, `false` otherwise. Does not throw.
+
+---
+
+### removeManifest
+
+```typescript
+removeManifest(name: string | Manifest): Promise<Record<string, unknown>>
+```
+
+Delete a manifest list. Accepts either a name string or an existing `Manifest` instance. Returns a summary object with an `ExitCode` property reflecting the HTTP status.
+
+---
+
+### list
+
+<Warning>
+  `list()` always throws `Error: Podman service does not support listing manifests.` The Podman libpod API does not expose a list endpoint for manifest lists. Use `get()` to fetch a specific manifest by name.
+</Warning>
+
+---
+
+## Manifest instance methods
+
+A `Manifest` object is returned by `create()` and `get()`. It exposes the following methods:
+
+### add
+
+```typescript
+add(images: Array<Image | string>, options?: {
+  all?: boolean;
+  annotation?: Record<string, string>;
+  arch?: string;
+  features?: string[];
+  os?: string;
+  osVersion?: string;
+  variant?: string;
+}): Promise<void>
+```
+
+Add one or more images to the manifest list. After a successful add, the instance's `attrs` are refreshed automatically via `reload()`.
+
+<ParamField body="images" type="Array<Image | string>" required>
+  Image references to add. Each may be an `Image` instance or a plain string tag.
+</ParamField>
+
+<ParamField body="options.all" type="boolean">
+  Include all platform variants when the source is itself a manifest list.
+</ParamField>
+
+<ParamField body="options.annotation" type="Record<string, string>">
+  Annotations to attach to each added image entry.
+</ParamField>
+
+<ParamField body="options.arch" type="string">
+  Override the architecture field (e.g. `"amd64"`, `"arm64"`).
+</ParamField>
+
+<ParamField body="options.os" type="string">
+  Override the OS field (e.g. `"linux"`, `"windows"`).
+</ParamField>
+
+<ParamField body="options.osVersion" type="string">
+  Override the OS version field.
+</ParamField>
+
+<ParamField body="options.variant" type="string">
+  Override the variant field (e.g. `"v8"` for arm64 variants).
+</ParamField>
+
+<ParamField body="options.features" type="string[]">
+  List of CPU features to record in the manifest entry.
+</ParamField>
+
+---
+
+### push
+
+```typescript
+push(destination: string, options?: {
+  all?: boolean;
+  authConfig?: Record<string, string>;
+}): Promise<void>
+```
+
+Push the manifest list to a registry destination.
+
+<ParamField body="destination" type="string" required>
+  Registry reference to push to (e.g. `"registry.example.com/myapp:latest"`).
+</ParamField>
+
+<ParamField body="options.all" type="boolean">
+  Push all referenced images alongside the manifest list.
+</ParamField>
+
+<ParamField body="options.authConfig" type="Record<string, string>">
+  Registry credentials forwarded in the `X-Registry-Auth` header. Typical keys: `username`, `password`, `serveraddress`.
+</ParamField>
+
+---
+
+### remove
+
+```typescript
+remove(digest: string): Promise<void>
+```
+
+Remove a single platform entry from the manifest list by its digest. The digest may be in the form `"sha256:<hex>"` or include an image reference prefix with `@` — the method normalises both. After removal, `attrs` are refreshed automatically.
+
+---
+
+### reload
+
+```typescript
+reload(): Promise<void>
+```
+
+Refresh this instance's `attrs` from the Podman API. Called automatically after `add()` and `remove()`.
+
+---
+
+## Manifest instance properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Manifest list name. |
+| `id` | `string \| undefined` | Digest of the first platform entry (hex portion only), or `name` if no entries exist. |
+| `mediaType` | `string \| undefined` | OCI media type of the manifest. |
+| `version` | `number \| undefined` | Schema version from the manifest JSON. |
+
+---
+
+## Code examples
+
+### Create a manifest list
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const manifest = await client.manifests.create(
+  "registry.example.com/myapp:latest",
+  ["docker.io/library/alpine:latest"],
+);
+
+console.log("Created manifest:", manifest.name);
+console.log("Media type:", manifest.mediaType);
+```
+
+### Add an image to an existing manifest
+
+```typescript
+const manifest = await client.manifests.get("registry.example.com/myapp:latest");
+
+await manifest.add(["docker.io/myorg/myapp:arm64"], {
+  arch: "arm64",
+  os: "linux",
+  variant: "v8",
+});
+
+console.log("Image added to manifest.");
+```
+
+<Tip>
+  Pass `all: true` when adding a manifest list reference (not a single image) to pull in every platform it contains.
+</Tip>
+
+### Push a manifest list to a registry
+
+```typescript
+await manifest.push("registry.example.com/myapp:latest", {
+  all: true,
+  authConfig: {
+    username: "myuser",
+    password: "mypassword",
+    serveraddress: "registry.example.com",
+  },
+});
+
+console.log("Manifest pushed successfully.");
+```
+
+### Remove a platform entry by digest
+
+```typescript
+const manifest = await client.manifests.get("registry.example.com/myapp:latest");
+
+// The digest can be the full "sha256:<hex>" form or an image@digest reference.
+await manifest.remove("sha256:abc123def456");
+
+console.log("Platform entry removed.");
+```
+
+### Check existence and delete a manifest
+
+```typescript
+const exists = await client.manifests.exists("registry.example.com/myapp:latest");
+
+if (exists) {
+  const result = await client.manifests.removeManifest("registry.example.com/myapp:latest");
+  console.log("Deleted, exit code:", result.ExitCode);
+}
+```

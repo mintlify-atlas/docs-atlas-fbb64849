@@ -1,133 +1,86 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "podman-ts: TypeScript SDK for Podman"
+description: "Type-safe TypeScript/Bun bindings for the Podman RESTful API. Manage containers, images, pods, networks, volumes, and more with a clean, idiomatic SDK."
 ---
 
-## Setting up
+podman-ts provides TypeScript/Bun bindings for the [Podman](https://podman.io) RESTful API (libpod). It gives you a type-safe, high-level interface for managing the full lifecycle of containers, images, pods, networks, volumes, secrets, manifests, quadlets, and OCI artifacts — all from TypeScript.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get a container running in under 5 minutes with a working code example.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Install via npm, bun, or JSR and configure for your runtime.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="PodmanClient" icon="plug" href="/concepts/client">
+    Learn how the top-level client works and how to configure connections.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/podman-client">
+    Full reference for every class, method, and type exported by podman-ts.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What you can do with podman-ts
 
-Everything you need to create world-class documentation.
+podman-ts wraps the Podman libpod HTTP API with resource managers that mirror how you think about containers — not raw HTTP verbs. Each resource (containers, images, pods, etc.) has a dedicated manager accessible from the top-level `PodmanClient`.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="Containers" icon="box" href="/resources/containers">
+    List, create, start, stop, run, stream logs, and exec into containers.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Images" icon="image" href="/resources/images">
+    Pull, push, build, search, tag, and inspect container images.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Pods" icon="layer-group" href="/resources/pods">
+    Create and manage Podman pods that group containers together.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Networks" icon="network-wired" href="/resources/networks">
+    Create and manage container networks with DNS and IPv6 support.
   </Card>
-</Columns>
+  <Card title="Volumes" icon="database" href="/resources/volumes">
+    Manage persistent storage volumes attached to containers and pods.
+  </Card>
+  <Card title="Secrets" icon="key" href="/resources/secrets">
+    Store and inject sensitive data securely into containers.
+  </Card>
+</CardGroup>
 
-## Make your content agent ready
+## Get started in 3 steps
 
-Make your docs work for humans and AI agents alike.
+<Steps>
+  <Step title="Install the package">
+    Add podman-ts to your project using your preferred package manager.
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+    <CodeGroup>
+    ```bash npm
+    npm install @pratyay360/podman-ts
+    ```
+    ```bash bun
+    bun add @pratyay360/podman-ts
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Create a client">
+    Import `PodmanClient` and connect to your local Podman socket. No configuration is needed for a default local install.
 
-## Need inspiration?
+    ```typescript
+    import { PodmanClient } from "@pratyay360/podman-ts";
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    const client = new PodmanClient();
+    ```
+  </Step>
+  <Step title="Manage your containers">
+    Use the resource managers to list, create, and control containers.
+
+    ```typescript
+    const containers = await client.containers.list({ all: true });
+    for (const container of containers) {
+      console.log(`${container.id} - ${container.name} (${container.status})`);
+    }
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  podman-ts uses Bun-native APIs (`Bun.spawn`, Unix-socket `fetch`). The primary runtime is **Bun ≥ 1.0**. Node.js ≥ 20 is supported for tooling compatibility, but execution is intended under Bun.
+</Note>

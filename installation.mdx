@@ -1,0 +1,85 @@
+---
+title: "Installing podman-ts"
+description: "Install the podman-ts TypeScript SDK via npm, bun, or JSR. Covers runtime requirements, package managers, and TypeScript configuration."
+---
+
+This page covers everything you need to get podman-ts installed and importable in your project: runtime and tooling requirements, all supported package managers, module format details, and TypeScript configuration.
+
+## Requirements
+
+Before installing, make sure your environment meets these requirements:
+
+- **Bun >= 1.0** — required at runtime. podman-ts uses Bun-native APIs (`Bun.fetch` for Unix socket connections, `Bun.spawn` for tar operations). Download at [bun.sh](https://bun.sh).
+- **Node >= 20** — supported for tooling (type-checking, linting, bundling) but not for execution.
+- **TypeScript >= 5.x** — the library ships with `.d.ts` declarations generated from TypeScript 5.
+- **Podman running locally** — with an accessible Unix socket or TCP endpoint. Verify with `podman info`.
+
+## Installation
+
+Choose the package manager you're already using in your project.
+
+<CodeGroup>
+
+```bash npm
+npm install @pratyay360/podman-ts
+```
+
+```bash bun
+bun add @pratyay360/podman-ts
+```
+
+```bash jsr
+npx jsr add @pratyay360/podman-ts
+```
+
+</CodeGroup>
+
+The package is published as `@pratyay360/podman-ts` on both [npm](https://www.npmjs.com/package/@pratyay360/podman-ts) and [JSR](https://jsr.io/@pratyay360/podman-ts). The JSR entry point (`jsr.json`) points directly to the TypeScript source.
+
+## ESM and CJS support
+
+The `exports` field in `package.json` ships both ESM and CommonJS builds:
+
+| Format | Entry point             | Types                   |
+| ------ | ----------------------- | ----------------------- |
+| ESM    | `dist/index.js`         | `dist/index.d.ts`       |
+| CJS    | `dist/index.cjs`        | `dist/index.d.cts`      |
+
+You can import from either format without any extra configuration. Bundlers and runtimes that respect the `exports` field (Bun, Node 20+, Vite, esbuild) will resolve the correct build automatically.
+
+<Info>
+  The package declares `"sideEffects": false`, so bundlers can safely tree-shake any managers or utilities you don't use.
+</Info>
+
+## Importing the SDK
+
+After installation, import `PodmanClient` from the package root:
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+```
+
+You can also import individual managers, error classes, or low-level utilities directly from the same entry point:
+
+```typescript
+import {
+  PodmanClient,
+  fromEnv,
+  APIClient,
+  APIError,
+  ImageNotFound,
+  ContainerError,
+} from "@pratyay360/podman-ts";
+```
+
+<Tip>
+  Run your scripts directly with Bun — no build step needed:
+
+  ```bash
+  bun run your-script.ts
+  ```
+
+  Bun understands TypeScript natively and will execute `.ts` files without compilation.
+</Tip>

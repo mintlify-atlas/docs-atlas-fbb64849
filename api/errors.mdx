@@ -1,0 +1,306 @@
+---
+title: "podman-ts error classes reference"
+description: "Full reference for all podman-ts error classes: PodmanError, APIError, NotFound, ImageNotFound, BuildError, ContainerError, and more."
+---
+
+podman-ts defines a structured error hierarchy so you can catch specific failure modes without inspecting raw HTTP status codes or string messages. All classes are named exports from `@pratyay360/podman-ts`.
+
+```typescript
+import {
+  PodmanError,
+  APIError,
+  NotFound,
+  ImageNotFound,
+  BuildError,
+  ContainerError,
+  InvalidArgument,
+  StreamParseError,
+} from "@pratyay360/podman-ts";
+```
+
+## Error hierarchy
+
+```
+Error
+└── PodmanError
+    ├── APIError
+    │   ├── NotFound
+    │   └── ImageNotFound
+    ├── BuildError
+    ├── ContainerError
+    ├── InvalidArgument
+    └── StreamParseError
+```
+
+## Error class reference
+
+<AccordionGroup>
+
+<Accordion title="PodmanError">
+
+Base class for all podman-ts errors. Extends the built-in `Error`.
+
+```typescript
+class PodmanError extends Error
+```
+
+**Constructor**
+
+```typescript
+new PodmanError(message: string)
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `message` | `string` | Human-readable error description. |
+| `name` | `string` | Always `"PodmanError"`. |
+
+Catch this class to handle any SDK-level error regardless of its specific type.
+
+```typescript
+try {
+  await client.containers.get("missing");
+} catch (err) {
+  if (err instanceof PodmanError) {
+    console.error("SDK error:", err.message);
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="APIError">
+
+Wraps HTTP error responses from the Podman service. Thrown by `APIResponse.raiseForStatus()` for any status `>= 400` that is not a 404.
+
+```typescript
+class APIError extends PodmanError
+```
+
+**Constructor**
+
+```typescript
+new APIError(message: string, statusCode?: number, explanation?: string)
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `message` | `string` | Short error description, taken from the `cause` field of the response body when available. |
+| `statusCode` | `number \| undefined` | HTTP status code returned by the service. |
+| `explanation` | `string \| undefined` | Secondary description, taken from the `message` field of the response body. |
+| `name` | `string` | Always `"APIError"`. |
+
+**Methods**
+
+| Method | Returns | Description |
+|---|---|---|
+| `isClientError()` | `boolean` | `true` when `statusCode` is 400–499. |
+| `isServerError()` | `boolean` | `true` when `statusCode` is 500–599. |
+| `toString()` | `string` | Formats the error as `"{statusCode} Client/Server Error: {message} ({explanation})"`. |
+
+</Accordion>
+
+<Accordion title="NotFound">
+
+Thrown by `APIResponse.raiseForStatus()` when the Podman service returns a 404 response for a generic resource.
+
+```typescript
+class NotFound extends APIError
+```
+
+**Constructor**
+
+```typescript
+new NotFound(message: string, explanation?: string)
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `statusCode` | `number` | Always `404`. |
+| `name` | `string` | Always `"NotFound"`. |
+
+```typescript
+try {
+  await client.containers.get("nonexistent");
+} catch (err) {
+  if (err instanceof NotFound) {
+    console.log("Container does not exist");
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="ImageNotFound">
+
+Thrown for 404 responses specific to image lookups, when the calling code passes `ImageNotFound` as the `NotFoundClass` argument to `raiseForStatus()`.
+
+```typescript
+class ImageNotFound extends APIError
+```
+
+**Constructor**
+
+```typescript
+new ImageNotFound(message: string, explanation?: string)
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `statusCode` | `number` | Always `404`. |
+| `name` | `string` | Always `"ImageNotFound"`. |
+
+```typescript
+try {
+  await client.images.get("nonexistent:tag");
+} catch (err) {
+  if (err instanceof ImageNotFound) {
+    console.log("Image not found locally");
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="BuildError">
+
+Thrown when an image build operation fails. Includes the accumulated build log so you can display or inspect the output that led to the failure.
+
+```typescript
+class BuildError extends PodmanError
+```
+
+**Constructor**
+
+```typescript
+new BuildError(message: string, buildLog?: string[])
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `message` | `string` | Short description of the build failure. |
+| `buildLog` | `string[]` | Ordered list of build output lines captured before the failure. Defaults to `[]`. |
+| `name` | `string` | Always `"BuildError"`. |
+
+```typescript
+try {
+  await client.images.build({ path: "./app", dockerfile: "Dockerfile" });
+} catch (err) {
+  if (err instanceof BuildError) {
+    console.error(err.buildLog.join("\n"));
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="ContainerError">
+
+Thrown when a container exits with a non-zero status code, e.g. from `containers.run()`.
+
+```typescript
+class ContainerError extends PodmanError
+```
+
+**Constructor**
+
+```typescript
+new ContainerError(message: string, exitStatus: number)
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `message` | `string` | Human-readable description. |
+| `exitStatus` | `number` | The process exit code returned by the container. |
+| `name` | `string` | Always `"ContainerError"`. |
+
+```typescript
+try {
+  await client.containers.run("alpine", { command: ["sh", "-c", "exit 1"] });
+} catch (err) {
+  if (err instanceof ContainerError) {
+    console.error("Exit code:", err.exitStatus);
+  }
+}
+```
+
+</Accordion>
+
+<Accordion title="InvalidArgument">
+
+Thrown by SDK methods when a caller passes a value that does not satisfy the method's preconditions.
+
+```typescript
+class InvalidArgument extends PodmanError
+```
+
+**Constructor**
+
+```typescript
+new InvalidArgument(message: string)
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `message` | `string` | Description of what was invalid. |
+| `name` | `string` | Always `"InvalidArgument"`. |
+
+</Accordion>
+
+<Accordion title="StreamParseError">
+
+Thrown when the SDK fails to parse a value from a streaming JSON response.
+
+```typescript
+class StreamParseError extends PodmanError
+```
+
+**Constructor**
+
+```typescript
+new StreamParseError(cause: unknown)
+```
+
+The `cause` is coerced to a string and embedded in the message: `"Stream parse error: {cause}"`.
+
+| Property | Type | Description |
+|---|---|---|
+| `message` | `string` | `"Stream parse error: {cause}"` |
+| `name` | `string` | Always `"StreamParseError"`. |
+
+</Accordion>
+
+</AccordionGroup>
+
+## Catching errors in practice
+
+```typescript
+import {
+  NotFound,
+  ImageNotFound,
+  BuildError,
+  ContainerError,
+  APIError,
+  PodmanError,
+} from "@pratyay360/podman-ts";
+
+try {
+  const image = await client.images.pull("private-registry.example.com/app:latest");
+} catch (err) {
+  if (err instanceof ImageNotFound) {
+    console.error("Image does not exist on the registry.");
+  } else if (err instanceof APIError && err.isClientError()) {
+    console.error(`Client error ${err.statusCode}: ${err.message}`);
+  } else if (err instanceof APIError && err.isServerError()) {
+    console.error(`Registry server error: ${err.toString()}`);
+  } else if (err instanceof PodmanError) {
+    console.error("SDK error:", err.message);
+  } else {
+    throw err; // re-throw unexpected errors
+  }
+}
+```
+
+<Tip>
+  Catch the most specific class first (`ImageNotFound` before `APIError`, `APIError` before `PodmanError`) because each subclass is also an instance of its parent.
+</Tip>

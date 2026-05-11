@@ -1,0 +1,159 @@
+---
+title: "Error handling in podman-ts"
+description: "podman-ts raises typed error classes for all API failures. Learn how to catch APIError, NotFound, ContainerError, BuildError, and other exceptions."
+---
+
+All errors in podman-ts extend either `PodmanError` or `APIError`. This consistent hierarchy means you can catch broad categories with a single `instanceof` check, or target specific failure modes with more precise classes.
+
+## Error hierarchy
+
+```
+PodmanError
+├── APIError             (HTTP errors — has statusCode and explanation)
+│   ├── NotFound         (404 responses)
+│   └── ImageNotFound    (404, image-specific)
+├── BuildError           (build failures — has buildLog: string[])
+├── ContainerError       (non-zero container exit — has exitStatus: number)
+├── InvalidArgument      (bad input passed to an API call)
+└── StreamParseError     (JSON stream parse failure)
+```
+
+`PodmanError` is the base class for every error the SDK raises. Catching it covers all SDK-level failures, though in practice you will usually want to handle `APIError` and its subclasses more specifically.
+
+## Catching errors
+
+Use `instanceof` checks to distinguish error types. Ordering matters: check more specific classes before more general ones.
+
+```typescript
+import {
+  APIError,
+  ContainerError,
+  ImageNotFound,
+  NotFound,
+} from "@pratyay360/podman-ts";
+
+try {
+  await client.images.get("non-existent-image");
+} catch (err) {
+  if (err instanceof ImageNotFound) {
+    console.log("Image does not exist locally — pull it first.");
+  } else if (err instanceof NotFound) {
+    console.log("Resource not found:", err.message);
+  } else if (err instanceof APIError) {
+    console.error(`${err.statusCode}: ${err.message}`);
+  } else {
+    throw err; // re-throw unexpected errors
+  }
+}
+```
+
+<Tip>
+  Always catch at least `APIError` around any SDK call that talks to the Podman service. Use more specific classes (`ImageNotFound`, `ContainerError`, `BuildError`) when you need to distinguish and handle those cases differently.
+</Tip>
+
+## APIError properties
+
+`APIError` wraps HTTP error responses (status codes 400 and above). It extends `PodmanError` and adds:
+
+| Property / Method | Type | Description |
+|---|---|---|
+| `statusCode` | `number \| undefined` | The HTTP status code returned by Podman. |
+| `explanation` | `string \| undefined` | Additional context from the response body, when available. |
+| `isClientError()` | `() => boolean` | Returns `true` for 4xx status codes. |
+| `isServerError()` | `() => boolean` | Returns `true` for 5xx status codes. |
+| `toString()` | `() => string` | Formatted string like `"404 Client Error: not found (image not found)"`. |
+
+```typescript
+import { APIError } from "@pratyay360/podman-ts";
+
+try {
+  await client.containers.get("missing-id");
+} catch (err) {
+  if (err instanceof APIError) {
+    console.log(err.statusCode);       // e.g. 404
+    console.log(err.explanation);      // detail from response body
+    console.log(err.isClientError());  // true for 4xx
+    console.log(err.isServerError());  // true for 5xx
+    console.log(err.toString());       // formatted message
+  }
+}
+```
+
+## ContainerError
+
+`ContainerError` is thrown by `client.containers.run()` when the container process exits with a non-zero status code. It extends `PodmanError` directly (not `APIError`) and carries the exit code.
+
+| Property | Type | Description |
+|---|---|---|
+| `exitStatus` | `number` | The exit code of the container process. |
+
+```typescript
+import { ContainerError } from "@pratyay360/podman-ts";
+
+try {
+  await client.containers.run("alpine", ["sh", "-c", "exit 1"]);
+} catch (err) {
+  if (err instanceof ContainerError) {
+    console.error(`Container exited with code ${err.exitStatus}`);
+  }
+}
+```
+
+<Note>
+  `ContainerError` is only raised by `containers.run()`. When you use `container.wait()` directly, you receive the exit code as a return value rather than an exception.
+</Note>
+
+## BuildError
+
+`BuildError` is thrown by `client.images.build()` when a build fails. It extends `PodmanError` and includes the full build log so you can surface the failure context.
+
+| Property | Type | Description |
+|---|---|---|
+| `buildLog` | `string[]` | Lines of build output captured before the failure. |
+
+```typescript
+import { BuildError } from "@pratyay360/podman-ts";
+
+try {
+  await client.images.build({ path: "./myapp" });
+} catch (err) {
+  if (err instanceof BuildError) {
+    console.error("Build failed:");
+    for (const line of err.buildLog) {
+      console.error(line);
+    }
+  }
+}
+```
+
+## Frequently asked questions
+
+<AccordionGroup>
+  <Accordion title="What is the difference between NotFound and ImageNotFound?">
+    Both map to HTTP 404 responses. `ImageNotFound` is used specifically when an image lookup fails (for example, `client.images.get()`), so you can distinguish a missing image from other missing resources (containers, networks, volumes) that raise `NotFound` instead.
+  </Accordion>
+
+  <Accordion title="When is InvalidArgument raised?">
+    `InvalidArgument` is thrown when input validation fails before a request is sent — for example, when a required field is missing or a parameter has an invalid value. It extends `PodmanError` directly and has no `statusCode`.
+  </Accordion>
+
+  <Accordion title="When is StreamParseError raised?">
+    `StreamParseError` wraps failures that occur while parsing a JSON stream from the Podman service — for example, during `client.events.list()` or streaming container logs with `decode: true`. It contains the underlying parse error as a string in its `message`.
+  </Accordion>
+
+  <Accordion title="How do I handle timeout errors?">
+    When a `timeout` is set on the client, timed-out requests throw a browser-native `DOMException` with `name: "TimeoutError"`. These are not wrapped into a `PodmanError` subclass, so check for them separately:
+
+    ```typescript
+    try {
+      await client.ping;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") {
+        console.error("Request timed out");
+      } else {
+        throw err;
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,134 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "podman-ts",
+  "projectDescription": "TypeScript/Bun SDK providing type-safe bindings for the Podman RESTful API (libpod), enabling programmatic management of containers, images, pods, networks, volumes, secrets, and more.",
+  "theme": "luma",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/client",
+              "concepts/connection",
+              "concepts/error-handling"
+            ]
+          },
+          {
+            "group": "Resource Managers",
+            "pages": [
+              "resources/containers",
+              "resources/images",
+              "resources/pods",
+              "resources/networks",
+              "resources/volumes",
+              "resources/secrets"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/manifests",
+              "advanced/quadlets",
+              "advanced/kube",
+              "advanced/artifacts",
+              "advanced/events",
+              "advanced/system",
+              "advanced/streaming"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Client",
+            "pages": [
+              "api/podman-client",
+              "api/api-client"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/utilities",
+              "api/errors"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Type-safe TypeScript bindings for the full Podman libpod REST API",
+    "Bun-native implementation using Unix socket and TCP connections",
+    "High-level resource managers for containers, images, pods, networks, volumes, secrets, manifests, quadlets, and artifacts",
+    "Streaming support for logs and events via async iterators",
+    "Kubernetes YAML generation and apply via kube manager",
+    "Docker-compatible client alias for drop-in replacement",
+    "Environment-based connection via CONTAINER_HOST / DOCKER_HOST",
+    "Named connection support via containers.conf / podman-connections.json",
+    "OCI artifact management (add, pull, push, extract)",
+    "Low-level APIClient for arbitrary libpod/compat requests"
+  ],
+  "publicApiSurface": [
+    "PodmanClient",
+    "DockerClient",
+    "fromEnv()",
+    "PodmanClientOptions",
+    "APIClient",
+    "APIResponse",
+    "ContainersManager",
+    "Container",
+    "ImagesManager",
+    "Image",
+    "PodsManager",
+    "Pod",
+    "NetworksManager",
+    "Network",
+    "VolumesManager",
+    "Volume",
+    "SecretsManager",
+    "Secret",
+    "ManifestsManager",
+    "Manifest",
+    "QuadletsManager",
+    "Quadlet",
+    "KubeManager",
+    "ArtifactsManager",
+    "Artifact",
+    "EventsManager",
+    "SystemManager",
+    "PodmanConfig",
+    "PodmanError",
+    "APIError",
+    "NotFound",
+    "ImageNotFound",
+    "BuildError",
+    "ContainerError",
+    "InvalidArgument",
+    "StreamParseError",
+    "prepareFilters",
+    "prepareBody",
+    "encodeAuthHeader",
+    "jsonStream",
+    "lineStream",
+    "VERSION",
+    "API_VERSION",
+    "COMPATIBLE_VERSION"
+  ]
+}

@@ -1,0 +1,338 @@
+---
+title: "Managing containers with podman-ts"
+description: "Use ContainersManager to list, create, run, start, stop, inspect, exec into, and stream logs from containers with the podman-ts SDK."
+---
+
+`ContainersManager` is the primary interface for working with Podman containers. It is accessible via `client.containers` on any `PodmanClient` instance and provides methods for the full container lifecycle — from creation through removal — as well as access to `Container` instances with their own per-container operations.
+
+## ContainersManager methods
+
+### list
+
+```typescript
+list(options?: ContainerListOptions): Promise<Container[]>
+```
+
+List containers. By default only running containers are returned.
+
+<ParamField body="options.all" type="boolean">
+  Include stopped containers. Equivalent to `podman ps -a`.
+</ParamField>
+
+<ParamField body="options.limit" type="number">
+  Maximum number of containers to return.
+</ParamField>
+
+<ParamField body="options.filters" type="Record<string, string | string[]>">
+  Key/value filters applied server-side (e.g. `{ status: "running", label: "app=web" }`).
+</ParamField>
+
+<ParamField body="options.since" type="string">
+  Return containers created after this container ID/name.
+</ParamField>
+
+<ParamField body="options.before" type="string">
+  Return containers created before this container ID/name.
+</ParamField>
+
+---
+
+### get
+
+```typescript
+get(id: string, options?: { compatible?: boolean }): Promise<Container>
+```
+
+Load a container by its ID or name. Throws `NotFound` if the container does not exist.
+
+<ParamField body="options.compatible" type="boolean">
+  Use the Docker-compatible endpoint (`/compat`) instead of libpod.
+</ParamField>
+
+---
+
+### create
+
+```typescript
+create(opts: ContainerCreateOptions): Promise<Container>
+```
+
+Create a container and return a `Container` instance. The container is not started — call `container.start()` after creation. Throws `ImageNotFound` if the image is not present locally.
+
+Key fields in `ContainerCreateOptions`:
+
+<ParamField body="opts.image" type="string" required>
+  Image reference (e.g. `"docker.io/library/nginx:latest"`).
+</ParamField>
+
+<ParamField body="opts.name" type="string">
+  Container name.
+</ParamField>
+
+<ParamField body="opts.command" type="string | string[]">
+  Override the image's default command.
+</ParamField>
+
+<ParamField body="opts.env" type="Record<string, string> | string[]">
+  Environment variables as a dict or `["KEY=value"]` list.
+</ParamField>
+
+<ParamField body="opts.ports" type="Record<string, unknown>">
+  Port mappings as `{ "80/tcp": 8080 }`. The key is `containerPort/protocol`; the value is the host port.
+</ParamField>
+
+<ParamField body="opts.volumes" type="Record<string, { bind: string; mode?: string }>">
+  Bind mounts as `{ "/host/path": { bind: "/container/path", mode: "ro" } }`.
+</ParamField>
+
+<ParamField body="opts.labels" type="Record<string, string>">
+  Container labels.
+</ParamField>
+
+<ParamField body="opts.privileged" type="boolean">
+  Run in privileged mode.
+</ParamField>
+
+<ParamField body="opts.remove" type="boolean">
+  Automatically remove the container when it exits.
+</ParamField>
+
+<ParamField body="opts.restartPolicy" type="{ Name: string; MaximumRetryCount?: number }">
+  Restart policy, e.g. `{ Name: "on-failure", MaximumRetryCount: 3 }`.
+</ParamField>
+
+<ParamField body="opts.workingDir" type="string">
+  Working directory inside the container.
+</ParamField>
+
+<ParamField body="opts.user" type="string | number">
+  User to run the container as.
+</ParamField>
+
+See `ContainerCreateOptions` in `src/domain/containers_create.ts` for the full list of accepted fields.
+
+---
+
+### run
+
+```typescript
+run(
+  image: string,
+  command?: string | string[],
+  options?: RunOptions
+): Promise<Container | string>
+```
+
+Create, start, and wait for a container in one call. This is the equivalent of `podman run`.
+
+- If the image is not found locally, it is pulled automatically (`policy: "missing"`).
+- On exit code `0`, returns the captured stdout as a string.
+- On non-zero exit, throws `ContainerError` with the exit code.
+- With `detach: true`, starts the container and returns the `Container` instance immediately.
+
+`RunOptions` extends `ContainerCreateOptions` (minus `image`) with:
+
+<ParamField body="options.stdout" type="boolean" default="true">
+  Capture stdout in the returned log string.
+</ParamField>
+
+<ParamField body="options.stderr" type="boolean" default="false">
+  Capture stderr in the returned log string.
+</ParamField>
+
+<ParamField body="options.remove" type="boolean" default="false">
+  Remove the container after it exits.
+</ParamField>
+
+<ParamField body="options.detach" type="boolean" default="false">
+  Return the `Container` immediately without waiting.
+</ParamField>
+
+<ParamField body="options.platform" type="string">
+  Platform override when pulling the image (e.g. `"linux/amd64"`).
+</ParamField>
+
+<ParamField body="options.authConfig" type="Record<string, string>">
+  Auth credentials forwarded to the pull call.
+</ParamField>
+
+---
+
+### exists
+
+```typescript
+exists(id: string): Promise<boolean>
+```
+
+Return `true` if a container with the given ID or name exists, `false` otherwise.
+
+---
+
+### remove
+
+```typescript
+remove(id: string, options?: {
+  force?: boolean;
+  volumes?: boolean;
+  depend?: boolean;
+  ignore?: boolean;
+  timeout?: number;
+}): Promise<void>
+```
+
+Remove a container by ID or name.
+
+<ParamField body="options.force" type="boolean">
+  Stop and remove a running container.
+</ParamField>
+
+<ParamField body="options.volumes" type="boolean">
+  Also remove anonymous volumes attached to the container.
+</ParamField>
+
+---
+
+### prune
+
+```typescript
+prune(filters?: Record<string, string>): Promise<Record<string, unknown>>
+```
+
+Remove all stopped containers. Optionally pass filters to narrow the set (e.g. `{ until: "24h" }`). Returns a summary of removed containers and reclaimed space.
+
+---
+
+## Container instance methods
+
+A `Container` object is returned by `create()`, `run()` (when detached), `get()`, and `list()`. It exposes these methods:
+
+### Lifecycle
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `start` | `(): Promise<void>` | Start the container. |
+| `stop` | `(options?: { timeout?: number }): Promise<void>` | Stop the container, with optional grace period in seconds. |
+| `restart` | `(options?: { timeout?: number }): Promise<void>` | Restart the container. |
+| `kill` | `(signal?: string \| number): Promise<void>` | Send a signal to the container (default `SIGKILL`). |
+| `pause` | `(): Promise<void>` | Pause all processes in the container. |
+| `unpause` | `(): Promise<void>` | Unpause a paused container. |
+| `wait` | `(options?: { condition?: string \| string[]; interval?: string }): Promise<number>` | Block until the container reaches `condition`. Returns the exit code. |
+| `remove` | `(options?: { force?: boolean; volumes?: boolean; depend?: boolean }): Promise<void>` | Remove the container. |
+
+### Inspection and metadata
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `inspect` | `(options?: { size?: boolean }): Promise<Record<string, unknown>>` | Return the full JSON inspect object from the Podman API. |
+| `rename` | `(newName: string): Promise<void>` | Rename the container. |
+| `reload` | `(): Promise<void>` | Refresh `container.attrs` from the API. |
+| `top` | `(options?: { psArgs?: string }): Promise<Record<string, unknown>>` | List running processes inside the container. |
+| `diff` | `(options?: { parent?: string; diffType?: "all" \| "container" \| "image" }): Promise<Array<Record<string, unknown>>>` | Show filesystem changes relative to the image. |
+
+### Logs
+
+```typescript
+logs(opts?: LogOptions): Promise<string>
+logs(opts: LogOptions & { stream: true }): Promise<AsyncIterable<string>>
+```
+
+Return container logs. When `stream: true` is set, the return type changes to `AsyncIterable<string>` for line-by-line streaming.
+
+<ParamField body="opts.stdout" type="boolean" default="true">
+  Include stdout.
+</ParamField>
+
+<ParamField body="opts.stderr" type="boolean" default="true">
+  Include stderr.
+</ParamField>
+
+<ParamField body="opts.follow" type="boolean" default="false">
+  Keep the stream open and follow new output (requires `stream: true`).
+</ParamField>
+
+<ParamField body="opts.since" type="string | number">
+  Only return logs since this timestamp or relative duration.
+</ParamField>
+
+<ParamField body="opts.until" type="string | number">
+  Only return logs up to this timestamp.
+</ParamField>
+
+<ParamField body="opts.tail" type='number | "all"'>
+  Number of lines from the end of the log to return.
+</ParamField>
+
+### Commit
+
+```typescript
+commit(options?: {
+  repository?: string;
+  tag?: string;
+  message?: string;
+  author?: string;
+}): Promise<Record<string, unknown>>
+```
+
+Create a new image from the container's current filesystem state.
+
+---
+
+## Code examples
+
+### List all containers
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const containers = await client.containers.list({ all: true });
+for (const c of containers) {
+  console.log(c.id, c.name, c.status);
+}
+```
+
+### Create and start a container with port mappings
+
+```typescript
+const container = await client.containers.create({
+  image: "docker.io/library/nginx:latest",
+  name: "my-nginx",
+  ports: { "80/tcp": 8080 },
+  labels: { app: "web" },
+});
+
+await container.start();
+console.log("Container started:", container.id);
+```
+
+### Stream logs from a running container
+
+```typescript
+const container = await client.containers.get("my-nginx");
+
+const logStream = await container.logs({ stream: true, follow: true });
+for await (const chunk of logStream) {
+  process.stdout.write(chunk + "\n");
+}
+```
+
+### Run a one-shot container
+
+```typescript
+// Runs the container, waits for exit, returns stdout.
+// Throws ContainerError if exit code is non-zero.
+const output = await client.containers.run(
+  "docker.io/library/alpine:latest",
+  ["echo", "hello from podman-ts"],
+  { remove: true }
+);
+console.log(output); // "hello from podman-ts"
+```
+
+### Remove stopped containers
+
+```typescript
+const result = await client.containers.prune({ until: "24h" });
+console.log("Pruned:", result);
+```

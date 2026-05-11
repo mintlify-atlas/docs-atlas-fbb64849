@@ -1,0 +1,151 @@
+---
+title: "System information and registry login"
+description: "Use SystemManager to check Podman system info, ping the service, get disk usage, view version details, and authenticate to registries."
+---
+
+`SystemManager` (exposed as `client.system`) provides methods for inspecting the Podman service itself: health checks, host information, disk usage, version details, and registry authentication. `PodmanClient` also exposes several of these as top-level convenience getters so you don't need to go through `client.system` for common reads.
+
+## Methods
+
+### `ping()`
+
+```typescript
+client.system.ping(): Promise<boolean>
+```
+
+Sends a `HEAD /_ping` request and returns `true` if the service responds successfully, `false` otherwise. Use this to verify connectivity before performing other operations.
+
+```typescript
+const alive = await client.system.ping();
+console.log("Podman reachable:", alive);
+```
+
+The same result is available via the convenience getter:
+
+```typescript
+const alive = await client.ping;
+```
+
+---
+
+### `info()`
+
+```typescript
+client.system.info(): Promise<Record<string, unknown>>
+```
+
+Sends `GET /info` and returns host-level information about the Podman installation — OS, kernel, cgroup driver, number of containers, storage driver, and more.
+
+```typescript
+const info = await client.system.info();
+console.log(info["OSType"], info["KernelVersion"]);
+```
+
+Convenience getter equivalent:
+
+```typescript
+const info = await client.info;
+```
+
+---
+
+### `version(options?)`
+
+```typescript
+client.system.version(options?: { apiVersion?: boolean }): Promise<Record<string, unknown>>
+```
+
+Sends `GET /version` and returns the Podman version object. Pass `{ apiVersion: false }` to strip the `APIVersion` field from the response.
+
+```typescript
+// Full version object
+const ver = await client.system.version();
+console.log(ver["Version"]);
+
+// Strip APIVersion from the response
+const ver2 = await client.system.version({ apiVersion: false });
+```
+
+Convenience getter equivalent (no option to strip `APIVersion`):
+
+```typescript
+const ver = await client.version;
+```
+
+---
+
+### `df()`
+
+```typescript
+client.system.df(): Promise<Record<string, unknown>>
+```
+
+Sends `GET /system/df` and returns a disk-usage summary covering containers, images, volumes, and build cache.
+
+```typescript
+const usage = await client.system.df();
+console.log(usage);
+```
+
+Convenience getter equivalent:
+
+```typescript
+const usage = await client.df;
+```
+
+---
+
+### `login(username, options?)`
+
+```typescript
+client.system.login(
+  username: string,
+  options?: LoginOptions,
+): Promise<Record<string, unknown>>
+```
+
+Authenticates to a container registry by posting credentials to `/auth` (using the Docker-compatible endpoint). Returns the registry response, which typically includes a token or status message.
+
+#### `LoginOptions`
+
+| Option      | Type      | Description                                      |
+| ----------- | --------- | ------------------------------------------------ |
+| `password`  | `string`  | Registry password or access token.               |
+| `email`     | `string`  | Account email address (some registries require this). |
+| `registry`  | `string`  | Registry server address (maps to `serveraddress` in the API payload). |
+| `tlsVerify` | `boolean` | Whether to verify the registry TLS certificate.  |
+
+```typescript
+const result = await client.system.login("myuser", {
+  password: "s3cr3t",
+  registry: "registry.example.com",
+  tlsVerify: true,
+});
+console.log(result["Status"]);
+```
+
+<Warning>
+Credentials are sent in the request body as plain JSON. Use TLS-verified endpoints (`tlsVerify: true`) and avoid logging the return value if it contains tokens.
+</Warning>
+
+---
+
+## Convenience getters on `PodmanClient`
+
+`PodmanClient` exposes four read-only getters that each return a `Promise`. They are shorthand for the corresponding `client.system.*` calls:
+
+| Getter           | Equivalent to              |
+| ---------------- | -------------------------- |
+| `client.ping`    | `client.system.ping()`     |
+| `client.version` | `client.system.version()`  |
+| `client.info`    | `client.system.info()`     |
+| `client.df`      | `client.system.df()`       |
+
+```typescript
+const [alive, ver, info, usage] = await Promise.all([
+  client.ping,
+  client.version,
+  client.info,
+  client.df,
+]);
+```

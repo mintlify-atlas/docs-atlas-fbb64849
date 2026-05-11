@@ -1,0 +1,259 @@
+---
+title: "Managing networks with podman-ts"
+description: "Use NetworksManager to create, list, inspect, connect containers to, and delete Podman networks. Supports DNS, IPv6, and custom IPAM configuration."
+---
+
+`NetworksManager` is the interface for creating and managing Podman container networks. It is accessible via `client.networks` on any `PodmanClient` instance. Networks define how containers communicate with each other and with external systems — you can configure drivers, DNS resolution, IPv6, and custom IP address management.
+
+## NetworksManager methods
+
+### create
+
+```typescript
+create(name: string, options?: NetworkCreateOptions): Promise<Network>
+```
+
+Create a new network. Returns a `Network` instance.
+
+<ParamField body="name" type="string" required>
+  Name of the network to create.
+</ParamField>
+
+<ParamField body="options.driver" type="string">
+  Network driver to use (e.g. `"bridge"`, `"macvlan"`). Defaults to `"bridge"` when omitted.
+</ParamField>
+
+<ParamField body="options.dnsEnabled" type="boolean">
+  Enable DNS resolution for containers on this network.
+</ParamField>
+
+<ParamField body="options.networkDnsServers" type="string[]">
+  Custom DNS server addresses used when `dnsEnabled` is `true`.
+</ParamField>
+
+<ParamField body="options.enableIpv6" type="boolean">
+  Enable IPv6 on the network.
+</ParamField>
+
+<ParamField body="options.internal" type="boolean">
+  Restrict external access — containers can only communicate with each other on this network.
+</ParamField>
+
+<ParamField body="options.labels" type="Record<string, string>">
+  Metadata labels to attach to the network.
+</ParamField>
+
+<ParamField body="options.options" type="Record<string, string>">
+  Driver-specific options passed through to the network backend.
+</ParamField>
+
+---
+
+### list
+
+```typescript
+list(options?: NetworkListOptions): Promise<Network[]>
+```
+
+List all networks.
+
+<ParamField body="options.filters" type="Record<string, string | string[]>">
+  Key/value filters applied server-side (e.g. `{ name: "my-net", label: "env=prod" }`).
+</ParamField>
+
+---
+
+### get
+
+```typescript
+get(key: string): Promise<Network>
+```
+
+Inspect a network by name or ID. Returns a `Network` instance. Throws `NotFound` if no matching network exists.
+
+---
+
+### exists
+
+```typescript
+exists(key: string): Promise<boolean>
+```
+
+Return `true` if a network with the given name or ID exists, `false` otherwise.
+
+---
+
+### remove
+
+```typescript
+remove(name: string, options?: { force?: boolean }): Promise<void>
+```
+
+Delete a network by name.
+
+<ParamField body="options.force" type="boolean">
+  Remove the network even if containers are still connected to it.
+</ParamField>
+
+---
+
+### prune
+
+```typescript
+prune(filters?: Record<string, string>): Promise<Record<string, unknown>>
+```
+
+Remove all unused networks. Optionally pass filters to narrow the set (e.g. `{ until: "24h" }`). Returns a summary of removed networks and reclaimed space.
+
+---
+
+## Network instance methods
+
+A `Network` object is returned by `create()`, `get()`, and `list()`. It exposes the following methods:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `connect` | `(containerId: string, options?: { aliases?: string[] }): Promise<void>` | Connect a container to the network. Optionally assign DNS aliases. |
+| `disconnect` | `(containerId: string, options?: { force?: boolean }): Promise<void>` | Disconnect a container from the network. |
+| `inspect` | `(): Promise<Record<string, unknown>>` | Return the full JSON inspect object from the Podman API. |
+| `update` | `(options: { addDNSServers?: string[]; removeDNSServers?: string[] }): Promise<void>` | Update DNS servers or other mutable network settings. |
+| `remove` | `(options?: { force?: boolean }): Promise<void>` | Delete this network. |
+| `reload` | `(): Promise<void>` | Refresh `network.attrs` from the API. |
+
+<Note>
+  `network.id` returns the network's ID and `network.name` returns its name, both sourced from the inspect attributes.
+</Note>
+
+---
+
+## IPAM configuration
+
+podman-ts exports two classes — `IPAMPool` and `IPAMConfig` — for Internet Protocol Address Management. These map directly to Podman's IPAM configuration structure and are provided for tooling compatibility when you need fine-grained control over IP subnets, ranges, and gateways.
+
+### IPAMPool
+
+`IPAMPool` defines a single IP address pool for a network subnet.
+
+```typescript
+import { IPAMPool } from "@pratyay360/podman-ts";
+
+const pool = new IPAMPool({
+  subnet: "10.10.0.0/24",
+  iprange: "10.10.0.128/25",
+  gateway: "10.10.0.1",
+  auxAddresses: { "reserved-host": "10.10.0.200" },
+});
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `subnet` | `string` | CIDR subnet (e.g. `"192.168.100.0/24"`). |
+| `iprange` | `string` | Allocatable range within the subnet. |
+| `gateway` | `string` | Gateway address for the subnet. |
+| `auxAddresses` | `Record<string, string>` | Named auxiliary addresses reserved outside the allocatable range. |
+
+### IPAMConfig
+
+`IPAMConfig` groups one or more `IPAMPool` instances under a named driver.
+
+```typescript
+import { IPAMConfig, IPAMPool } from "@pratyay360/podman-ts";
+
+const ipam = new IPAMConfig({
+  driver: "host-local",
+  poolConfigs: [
+    new IPAMPool({ subnet: "10.10.0.0/24", gateway: "10.10.0.1" }),
+  ],
+});
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `driver` | `string` | `"host-local"` | IPAM driver name. |
+| `poolConfigs` | `IPAMPool[]` | `[]` | One or more pool configurations. |
+| `options` | `Record<string, unknown>` | `{}` | Driver-specific options. |
+
+<Tip>
+  Pass the constructed `IPAMConfig` object in `options.options` when calling `client.networks.create()` to configure custom address pools.
+</Tip>
+
+---
+
+## Code examples
+
+### Create a bridge network with DNS enabled
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const network = await client.networks.create("app-net", {
+  driver: "bridge",
+  dnsEnabled: true,
+  labels: { env: "production" },
+});
+
+console.log("Created network:", network.name, network.id);
+```
+
+### Create a network with a custom IPAM pool
+
+```typescript
+import { PodmanClient, IPAMConfig, IPAMPool } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const pool = new IPAMPool({
+  subnet: "10.88.0.0/24",
+  gateway: "10.88.0.1",
+  iprange: "10.88.0.128/25",
+});
+
+const ipam = new IPAMConfig({
+  driver: "host-local",
+  poolConfigs: [pool],
+});
+
+const network = await client.networks.create("custom-subnet-net", {
+  driver: "bridge",
+  dnsEnabled: true,
+  options: { ipam: JSON.stringify(ipam) },
+});
+```
+
+### Connect and disconnect a container
+
+```typescript
+const network = await client.networks.get("app-net");
+
+// Connect a container, optionally assigning DNS aliases
+await network.connect("my-container", { aliases: ["web", "frontend"] });
+
+// Disconnect the container
+await network.disconnect("my-container");
+```
+
+### List and filter networks
+
+```typescript
+// List all networks with a specific label
+const networks = await client.networks.list({
+  filters: { label: "env=production" },
+});
+
+for (const net of networks) {
+  console.log(net.name, net.id);
+}
+```
+
+### Remove a network
+
+```typescript
+// Remove by name via the manager
+await client.networks.remove("app-net");
+
+// Or via a Network instance — force-remove even with connected containers
+const network = await client.networks.get("app-net");
+await network.remove({ force: true });
+```

@@ -1,0 +1,169 @@
+---
+title: "PodmanClient: the top-level SDK entry point"
+description: "Learn how PodmanClient works, what resource managers it exposes, and how to configure the client with options like version, timeout, and baseUrl."
+---
+
+`PodmanClient` is the top-level class exported from podman-ts. Every operation — listing containers, pulling images, creating networks — starts by instantiating this class. It owns all resource managers and handles connection resolution automatically.
+
+## Creating a client
+
+With no arguments, `PodmanClient` connects to the local Podman socket using the default resolution order.
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+// Default: uses local Unix socket (or active Podman machine)
+const client = new PodmanClient();
+
+// With explicit options
+const client = new PodmanClient({
+  baseUrl: "http+unix:///run/user/1000/podman/podman.sock",
+  version: "v5.0.0",
+  timeout: 10000,
+});
+
+// Named connection from containers.conf
+const client = new PodmanClient({
+  connection: "my-remote-machine",
+});
+```
+
+## Client options
+
+<ParamField path="body.baseUrl" type="string">
+  Full URL to the Podman service. Supports `http+unix://`, `http://`, and `tcp://`. When provided, it takes precedence over `connection` and the active service. SSH (`ssh://`) is not directly supported — use an SSH tunnel and connect via `tcp://` or `http+unix://` instead.
+</ParamField>
+
+<ParamField path="body.connection" type="string">
+  Named connection from `containers.conf` or `podman-connections.json`. The SDK reads these files via `PodmanConfig` at construction time and resolves the URL from the matching service entry. Ignored when `baseUrl` is set.
+</ParamField>
+
+<ParamField path="body.version" type="string" default="v5.0.0">
+  API version string used as a path prefix for all requests (e.g. `/v5.0.0/libpod/...`). Override this if you are connecting to an older Podman service.
+</ParamField>
+
+<ParamField path="body.timeout" type="number">
+  Request timeout in milliseconds. When set, an `AbortSignal.timeout()` is attached to every fetch call. Requests that exceed the timeout throw a network-level error.
+</ParamField>
+
+<ParamField path="body.identity" type="string">
+  Path to an SSH identity file. Relevant only when you have set up an SSH tunnel — the library itself does not initiate SSH connections.
+</ParamField>
+
+## Default connection resolution
+
+When `baseUrl` is not provided, the constructor resolves the connection in this order:
+
+<Steps>
+  <Step title="Named connection">
+    If `connection` is set, `PodmanConfig` looks up the service in `podman-connections.json` (or the legacy `containers.conf` TOML). A missing connection name throws immediately.
+  </Step>
+  <Step title="Active Podman machine">
+    If no `connection` is given, `PodmanConfig` checks whether the active service is a Podman machine (`IsMachine: true`). If it is, the machine's URL is used.
+  </Step>
+  <Step title="Local Unix socket">
+    If no machine is active, the constructor falls back to the local socket path:
+    - **Root:** `http+unix:///run/podman/podman.sock`
+    - **Rootless:** `http+unix://${XDG_RUNTIME_DIR}/podman/podman.sock` (defaults to `/run/user/{uid}/podman/podman.sock` when `XDG_RUNTIME_DIR` is not set)
+  </Step>
+</Steps>
+
+<Note>
+  `new PodmanClient()` does **not** read `CONTAINER_HOST` or `DOCKER_HOST`. To pick up those environment variables, use [`PodmanClient.fromEnv()`](#fromenv-factory) or the [`fromEnv()`](#fromenv-factory) shorthand instead.
+</Note>
+
+## Resource managers
+
+All resource managers are lazily instantiated on first access and share the same underlying `APIClient`.
+
+| Property | Manager | Description |
+|---|---|---|
+| `client.containers` | `ContainersManager` | Create, list, inspect, run, and remove containers. See [Containers](/resources/containers). |
+| `client.images` | `ImagesManager` | Pull, push, build, search, and manage images. See [Images](/resources/images). |
+| `client.pods` | `PodsManager` | Create and manage pods (groups of containers). See [Pods](/resources/pods). |
+| `client.networks` | `NetworksManager` | Create and manage container networks. See [Networks](/resources/networks). |
+| `client.volumes` | `VolumesManager` | Create and manage persistent volumes. See [Volumes](/resources/volumes). |
+| `client.secrets` | `SecretsManager` | Store and retrieve secrets. See [Secrets](/resources/secrets). |
+| `client.manifests` | `ManifestsManager` | Create and push multi-architecture manifest lists. See [Manifests](/advanced/manifests). |
+| `client.quadlets` | `QuadletsManager` | Install and manage systemd Quadlet unit files. See [Quadlets](/advanced/quadlets). |
+| `client.events` | `EventsManager` | Stream real-time events from the Podman service. See [Events](/advanced/events). |
+| `client.system` | `SystemManager` | Ping, info, version, disk usage, and registry login. See [System](/advanced/system). |
+| `client.kube` | `KubeManager` | Generate and apply Kubernetes YAML. See [Kube](/advanced/kube). |
+| `client.artifacts` | `ArtifactsManager` | Manage OCI artifacts. See [Artifacts](/advanced/artifacts). |
+
+## Convenience properties
+
+These top-level getters delegate to the corresponding `SystemManager` methods and return promises directly:
+
+```typescript
+// Check that the Podman service is reachable
+const alive: boolean = await client.ping;
+
+// Get the Podman and API version information
+const ver: Record<string, unknown> = await client.version;
+
+// Get detailed system information
+const sysInfo: Record<string, unknown> = await client.info;
+
+// Get disk usage summary (containers, images, volumes)
+const usage: Record<string, unknown> = await client.df;
+```
+
+## Low-level access
+
+`client.api` exposes the underlying `APIClient` for arbitrary libpod or Docker-compatible requests. Use this for endpoints not yet covered by the high-level managers.
+
+```typescript
+// libpod endpoint (default prefix: /v{version}/libpod)
+const res = await client.api.get("/containers/json", {
+  params: { all: true },
+});
+
+// Docker-compatible endpoint (prefix: /v{version}/compat)
+const res = await client.api.post("/auth", {
+  data: { username: "myuser", password: "secret" },
+  compatible: true,
+});
+```
+
+`APIClient` exposes `get`, `post`, `put`, `patch`, `delete`, `head`, and `options` methods, all returning an `APIResponse<T>`. Call `.raiseForStatus()` on the response to convert HTTP error codes into typed exceptions.
+
+## DockerClient alias
+
+`DockerClient` is an exported alias for `PodmanClient`. It exists for projects migrating from Docker SDK patterns where the client class is named `DockerClient`.
+
+```typescript
+import { DockerClient } from "@pratyay360/podman-ts";
+
+const client = new DockerClient();
+// Identical to new PodmanClient()
+```
+
+## fromEnv factory
+
+Use `PodmanClient.fromEnv()` (or the shorthand `fromEnv()`) when the service URL should come from an environment variable. It checks `CONTAINER_HOST` first, then `DOCKER_HOST`, and falls back to the default socket path if neither is set.
+
+```typescript
+import { fromEnv, PodmanClient } from "@pratyay360/podman-ts";
+
+// Both are equivalent
+const client = fromEnv();
+const same = PodmanClient.fromEnv();
+
+// Pass additional options (excluding baseUrl, which comes from env)
+const client = PodmanClient.fromEnv({ timeout: 5000 });
+```
+
+## Disposal
+
+Call `client.close()` when you are done with the client. It is currently a no-op (Bun's fetch has no persistent connection pool to drain), but the method is available now so code that calls it remains forward-compatible.
+
+`PodmanClient` also implements `Symbol.dispose`, which means it works with the `using` keyword from the [Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management) proposal:
+
+```typescript
+{
+  using client = new PodmanClient();
+  await client.containers.list();
+  // client.close() is called automatically when the block exits
+}
+```

@@ -1,0 +1,210 @@
+---
+title: "podman-ts utility functions and constants"
+description: "Reference for podman-ts utility exports: prepareFilters, prepareBody, encodeAuthHeader, jsonStream, lineStream, and version constants."
+---
+
+podman-ts exposes a set of utility functions and constants used internally by its resource managers. You can import them directly when working with the low-level `APIClient` or when building your own extensions on top of the SDK.
+
+## Version constants
+
+Exported from `@pratyay360/podman-ts`.
+
+| Constant | Value | Description |
+|---|---|---|
+| `VERSION` | `"5.8.0"` | SDK version string. Also re-exported as `API_VERSION`. |
+| `API_VERSION` | `"5.8.0"` | Alias for `VERSION`. |
+| `COMPATIBLE_VERSION` | `"1.40"` | Docker-compatible API version string used for compat-prefix requests. |
+| `DEFAULT_CHUNK_SIZE` | `2097152` (2 MiB) | Default chunk size used by streaming operations. |
+
+```typescript
+import { VERSION, API_VERSION, COMPATIBLE_VERSION, DEFAULT_CHUNK_SIZE } from "@pratyay360/podman-ts";
+```
+
+## API utilities
+
+### prepareFilters
+
+```typescript
+function prepareFilters(
+  filters?: Record<string, string | string[] | boolean | number | null | undefined> | string[] | null
+): string | undefined
+```
+
+Serializes a filters argument to a JSON string in the format required by Podman API query parameters (`Record<string, string[]>`).
+
+- Accepts either an object mapping filter keys to values, or an array of `"key=value"` strings.
+- `null` and `undefined` values are dropped.
+- Returns `undefined` when the input is empty or produces no criteria.
+
+```typescript
+import { prepareFilters } from "@pratyay360/podman-ts";
+
+prepareFilters({ status: "running", label: ["env=prod", "team=platform"] });
+// → '{"status":["running"],"label":["env=prod","team=platform"]}'
+
+prepareFilters(["status=running", "label=env=prod"]);
+// → '{"status":["running"],"label":["env=prod"]}'
+```
+
+---
+
+### prepareBody
+
+```typescript
+function prepareBody(body: Record<string, unknown>): string
+```
+
+Serializes a request body object to a JSON string, recursively stripping `null`, `undefined`, and empty-array values. Use this when building a body for `APIClient` requests that must omit unset fields.
+
+```typescript
+import { prepareBody } from "@pratyay360/podman-ts";
+
+prepareBody({ Name: "mynet", Labels: null, Options: {} });
+// → '{"Name":"mynet"}'
+```
+
+---
+
+### encodeAuthHeader
+
+```typescript
+function encodeAuthHeader(authConfig: Record<string, string>): string
+```
+
+Base64-encodes a JSON auth config object for use as the `X-Registry-Auth` header value.
+
+```typescript
+import { encodeAuthHeader } from "@pratyay360/podman-ts";
+
+const header = encodeAuthHeader({
+  username: "user",
+  password: "secret",
+  serveraddress: "registry.example.com",
+});
+// pass as: { headers: { "X-Registry-Auth": header } }
+```
+
+---
+
+### parseRepository
+
+```typescript
+function parseRepository(name: string): [string, string | undefined]
+```
+
+Splits an image reference into `[repository, tag]`. Returns `[name, undefined]` when no tag is present, or when the colon is part of a port number (i.e. the tag contains `/`).
+
+```typescript
+parseRepository("alpine:3.18");        // → ["alpine", "3.18"]
+parseRepository("alpine");             // → ["alpine", undefined]
+parseRepository("localhost:5000/img"); // → ["localhost:5000/img", undefined]
+```
+
+---
+
+### prepareTimestamp
+
+```typescript
+function prepareTimestamp(value: Date | number | null | undefined): number | undefined
+```
+
+Converts a `Date` object or a numeric Unix timestamp (seconds) to a UTC Unix timestamp in seconds. Returns `undefined` for `null` or `undefined` input.
+
+```typescript
+prepareTimestamp(new Date("2024-01-01T00:00:00Z")); // → 1704067200
+prepareTimestamp(1704067200);                        // → 1704067200
+prepareTimestamp(null);                              // → undefined
+```
+
+---
+
+### demuxOutput
+
+```typescript
+function demuxOutput(data: Uint8Array): { stdout: Uint8Array; stderr: Uint8Array }
+```
+
+Demultiplexes a Docker-style multiplexed binary stream into separate `stdout` and `stderr` buffers. Each frame in the stream has an 8-byte header: 1 byte stream type (`1` = stdout, `2` = stderr), 3 bytes padding, and 4 bytes big-endian payload length.
+
+```typescript
+import { demuxOutput } from "@pratyay360/podman-ts";
+
+const raw = await response.arrayBuffer();
+const { stdout, stderr } = demuxOutput(new Uint8Array(raw));
+console.log(new TextDecoder().decode(stdout));
+```
+
+## Stream helpers
+
+### jsonStream
+
+```typescript
+async function* jsonStream(
+  source: AsyncIterable<string> | Iterable<string>
+): AsyncGenerator<unknown>
+```
+
+An async generator that reads concatenated JSON objects from any string iterable and yields each parsed value. Accepts both synchronous and asynchronous sources. Used internally for endpoints that stream newline-delimited or concatenated JSON (e.g. image pull progress, event streams). Throws `StreamParseError` if unparseable text remains after the source closes.
+
+```typescript
+import { jsonStream } from "@pratyay360/podman-ts";
+
+// Use with a container log stream
+const logStream = await container.logs({ stream: true });
+for await (const event of jsonStream(logStream)) {
+  console.log(event);
+}
+```
+
+---
+
+### lineStream
+
+```typescript
+async function* lineStream(source: AsyncIterable<string>): AsyncGenerator<string>
+```
+
+An async generator that splits an async string iterable on newline boundaries and yields each non-empty line. Partial lines are buffered internally across chunk boundaries. Any trailing content after the source closes is flushed as a final line.
+
+```typescript
+import { lineStream } from "@pratyay360/podman-ts";
+
+// Use with a container log stream
+const logStream = await container.logs({ stream: true });
+for await (const line of lineStream(logStream)) {
+  console.log(line);
+}
+```
+
+## Configuration helpers
+
+### PodmanConfig and ServiceConnection
+
+`PodmanConfig` reads `containers.conf` and `podman-connections.json` to discover available Podman services.
+
+```typescript
+import { PodmanConfig, ServiceConnection } from "@pratyay360/podman-ts";
+
+const config = new PodmanConfig();
+const active: ServiceConnection | undefined = config.activeService;
+console.log(active?.url.toString());
+
+const all: Record<string, ServiceConnection> = config.services;
+```
+
+`ServiceConnection` holds the attributes of a single named connection (URL, identity, machine flag, etc.).
+
+## Network IPAM helpers
+
+### IPAMConfig and IPAMPool
+
+Helpers for constructing IPAM configuration objects when creating networks.
+
+```typescript
+import { IPAMConfig, IPAMPool } from "@pratyay360/podman-ts";
+
+const pool = new IPAMPool({ subnet: "10.88.0.0/16", gateway: "10.88.0.1" });
+const ipam = new IPAMConfig({ pools: [pool] });
+
+await client.networks.create("mynet", { ipam });
+```

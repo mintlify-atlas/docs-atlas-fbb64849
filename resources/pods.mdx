@@ -1,0 +1,185 @@
+---
+title: "Managing pods with podman-ts"
+description: "Use PodsManager to create, list, start, stop, and manage Podman pods — groups of containers sharing the same network and IPC namespaces."
+---
+
+A Podman **pod** is a group of one or more containers that share a network namespace, IPC namespace, and (optionally) other Linux namespaces — similar to a Kubernetes Pod. Containers inside a pod can communicate over `localhost` and share the same IP address. Pods are useful when you need to co-locate tightly coupled processes, such as an application container and a sidecar, without requiring a full orchestrator.
+
+`PodsManager` is accessible via `client.pods` on any `PodmanClient` instance.
+
+## PodsManager methods
+
+### create
+
+```typescript
+create(name: string, options?: Record<string, unknown>): Promise<Pod>
+```
+
+Create a new pod. Returns a `Pod` instance. The `options` object is serialized directly as the JSON request body, so any field accepted by the Podman `POST /pods/create` endpoint can be passed (e.g. `infraImage`, `portmappings`, `shareNamespaces`).
+
+<ParamField body="name" type="string" required>
+  Name for the pod. Must be unique on the host.
+</ParamField>
+
+<ParamField body="options" type="Record<string, unknown>">
+  Additional pod creation fields forwarded directly to the Podman API body (e.g. `{ portmappings: [{ container_port: 80, host_port: 8080, protocol: "tcp" }] }`).
+</ParamField>
+
+---
+
+### list
+
+```typescript
+list(options?: PodListOptions): Promise<Pod[]>
+```
+
+List pods on the host.
+
+<ParamField body="options.filters" type="Record<string, string | string[]>">
+  Key/value filters (e.g. `{ name: "web-pod", status: "running" }`).
+</ParamField>
+
+---
+
+### get
+
+```typescript
+get(id: string): Promise<Pod>
+```
+
+Inspect a pod by ID or name. Returns a `Pod` instance. Throws `NotFound` if the pod does not exist.
+
+---
+
+### exists
+
+```typescript
+exists(id: string): Promise<boolean>
+```
+
+Return `true` if a pod with the given ID or name exists, `false` otherwise.
+
+---
+
+### remove
+
+```typescript
+remove(id: string, options?: { force?: boolean }): Promise<void>
+```
+
+Remove a pod by ID or name. Throws `NotFound` if the pod does not exist.
+
+<ParamField body="options.force" type="boolean">
+  Stop and remove a running pod and all of its containers.
+</ParamField>
+
+---
+
+### prune
+
+```typescript
+prune(filters?: Record<string, string>): Promise<Record<string, unknown>>
+```
+
+Remove stopped pods. Pass filters to narrow which pods are pruned. Returns a summary of removed pods.
+
+---
+
+### stats
+
+```typescript
+stats(options?: { all?: boolean }): Promise<Record<string, unknown>[]>
+```
+
+Return resource usage statistics for pods.
+
+<ParamField body="options.all" type="boolean">
+  Include stats for all pods, not just running ones.
+</ParamField>
+
+---
+
+## Pod instance methods
+
+A `Pod` object is returned by `create()`, `get()`, and each element of `list()`.
+
+### Lifecycle
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `start` | `(): Promise<void>` | Start the pod and all of its containers. |
+| `stop` | `(options?: { timeout?: number }): Promise<void>` | Stop the pod. Optional `timeout` (seconds) before force kill. |
+| `restart` | `(): Promise<void>` | Restart the pod. |
+| `kill` | `(signal?: string \| number): Promise<void>` | Send a signal to all containers in the pod. |
+| `pause` | `(): Promise<void>` | Pause all containers in the pod. |
+| `unpause` | `(): Promise<void>` | Unpause a paused pod. |
+| `remove` | `(options?: { force?: boolean }): Promise<void>` | Remove the pod. |
+
+### Inspection
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `top` | `(options?: { psArgs?: string }): Promise<Record<string, unknown>>` | List processes running in the pod's containers. |
+| `reload` | `(): Promise<void>` | Refresh `pod.attrs` from the API. |
+
+**Accessor properties:** `pod.id`, `pod.name`.
+
+<Note>
+  `Pod` instances do not expose an `inspect()` shortcut. To get full inspect data, call `client.pods.get(pod.id)` which re-fetches from the API, or call `pod.reload()` to update the cached `pod.attrs` in place.
+</Note>
+
+---
+
+## Code examples
+
+### Create a pod
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const pod = await client.pods.create("web-pod", {
+  portmappings: [
+    { container_port: 80, host_port: 8080, protocol: "tcp" },
+  ],
+});
+
+console.log("Created pod:", pod.id, pod.name);
+```
+
+### List pods with filters
+
+```typescript
+// List only running pods whose name starts with "web".
+const pods = await client.pods.list({
+  filters: { status: "running", name: "web" },
+});
+
+for (const p of pods) {
+  console.log(p.id, p.name);
+}
+```
+
+### Start and stop a pod
+
+```typescript
+const pod = await client.pods.get("web-pod");
+
+await pod.start();
+console.log("Pod started");
+
+// ... do work ...
+
+await pod.stop({ timeout: 10 });
+console.log("Pod stopped");
+```
+
+### Get pod stats
+
+```typescript
+const stats = await client.pods.stats({ all: true });
+for (const entry of stats) {
+  console.log(entry["Name"], entry["CPU"], entry["MemUsage"]);
+}
+```

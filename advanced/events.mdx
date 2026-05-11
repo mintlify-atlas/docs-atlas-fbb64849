@@ -1,0 +1,80 @@
+---
+title: "Subscribing to Podman events"
+description: "Use EventsManager to consume real-time Podman events as an async iterator. Filter by event type, actor, time range, and decode raw lines into objects."
+---
+
+`EventsManager` (exposed as `client.events`) gives you a live stream of Podman service events as an async generator. Because it uses `stream: true` under the hood, you iterate over events with a standard `for await...of` loop — there is no separate `stream()` method.
+
+## `list(options?)`
+
+```typescript
+client.events.list(options?: EventsListOptions): AsyncGenerator<string | Record<string, unknown>>
+```
+
+Opens a streaming `GET /events` request and yields one item per newline-delimited event. When the generator is exhausted the connection has closed on the server side.
+
+### `EventsListOptions`
+
+| Option    | Type                                  | Description                                                                                             |
+| --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `since`   | `Date \| number`                      | Return events that occurred after this timestamp. Accepts a `Date` object or a Unix timestamp (seconds). |
+| `until`   | `Date \| number`                      | Stop returning events after this timestamp.                                                             |
+| `filters` | `Record<string, string \| string[]>`  | Key/value filters forwarded to the Podman API (e.g. `{ type: "container" }`).                           |
+| `decode`  | `boolean`                             | When `true`, each yielded value is a parsed `Record<string, unknown>`. Otherwise a raw JSON string is yielded. |
+
+## Basic usage
+
+Iterate over all incoming events and print each one as a parsed object:
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+for await (const line of client.events.list({ decode: true })) {
+  const event = line as Record<string, unknown>;
+  console.log(event);
+}
+```
+
+## Filtering events by type
+
+Pass a `filters` map to narrow the stream. The keys and values mirror the Podman API filter syntax:
+
+```typescript
+// Only receive container events
+for await (const line of client.events.list({
+  decode: true,
+  filters: { type: "container" },
+})) {
+  const event = line as Record<string, unknown>;
+  console.log(event["Action"], event["Actor"]);
+}
+```
+
+```typescript
+// Only receive image pull/push events since a specific point in time
+const since = new Date(Date.now() - 60_000); // last 60 seconds
+
+for await (const line of client.events.list({
+  decode: true,
+  since,
+  filters: { type: "image" },
+})) {
+  console.log(line);
+}
+```
+
+## Raw string mode
+
+Omit `decode` (or set it to `false`) to receive the raw newline-delimited JSON strings. This is useful when you want to forward events to another sink without the overhead of parsing:
+
+```typescript
+for await (const raw of client.events.list()) {
+  process.stdout.write(raw + "\n");
+}
+```
+
+<Note>
+There is no separate `stream()` method on `EventsManager`. Always use `for await...of client.events.list()` to consume the event stream.
+</Note>

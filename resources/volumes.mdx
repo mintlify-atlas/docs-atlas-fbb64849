@@ -1,0 +1,180 @@
+---
+title: "Managing volumes with podman-ts"
+description: "Use VolumesManager to create, list, inspect, export, and delete persistent Podman volumes for stateful container workloads with the podman-ts SDK."
+---
+
+`VolumesManager` is the interface for managing Podman volumes. Access it via `client.volumes` on any `PodmanClient` instance. Volumes provide persistent, named storage that outlives individual containers and can be shared across them.
+
+## VolumesManager methods
+
+### list
+
+```typescript
+list(options?: VolumeListOptions): Promise<Volume[]>
+```
+
+Return all volumes visible to the Podman daemon.
+
+<ParamField body="options.filters" type="Record<string, string | string[]>">
+  Key/value filters applied server-side. Common keys include `name`, `driver`, and `label`.
+</ParamField>
+
+---
+
+### create
+
+```typescript
+create(name?: string, options?: VolumeCreateOptions): Promise<Volume>
+```
+
+Create a named volume and return a `Volume` instance. If `name` is omitted, Podman generates one.
+
+<ParamField body="name" type="string">
+  Volume name. If omitted, Podman assigns a random name.
+</ParamField>
+
+<ParamField body="options.driver" type="string">
+  Volume driver to use (e.g. `"local"`). Defaults to the daemon's default driver.
+</ParamField>
+
+<ParamField body="options.driverOpts" type="Record<string, string>">
+  Driver-specific options passed through to the selected driver.
+</ParamField>
+
+<ParamField body="options.labels" type="Record<string, string>">
+  Labels to attach to the volume.
+</ParamField>
+
+---
+
+### get
+
+```typescript
+get(volumeId: string): Promise<Volume>
+```
+
+Load a volume by name. Throws `NotFound` if the volume does not exist.
+
+---
+
+### exists
+
+```typescript
+exists(key: string): Promise<boolean>
+```
+
+Return `true` if a volume with the given name exists, `false` otherwise.
+
+---
+
+### remove
+
+```typescript
+remove(name: string, options?: { force?: boolean }): Promise<void>
+```
+
+Remove a volume by name.
+
+<ParamField body="options.force" type="boolean">
+  Remove the volume even if it is in use by a container.
+</ParamField>
+
+---
+
+### prune
+
+```typescript
+prune(filters?: Record<string, string>): Promise<Record<string, unknown>>
+```
+
+Remove all unused volumes. Optionally pass filters to narrow the set (e.g. `{ label: "env=dev" }`). Returns a summary of removed volumes and reclaimed disk space.
+
+<Note>
+  `prune()` is irreversible. Any data stored in unused volumes will be permanently deleted.
+</Note>
+
+---
+
+## Volume instance methods
+
+A `Volume` object is returned by `create()`, `get()`, and `list()`. It exposes the following methods:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `inspect` | `(): Promise<Record<string, unknown>>` | Return the full JSON inspect object from the Podman API. |
+| `remove` | `(options?: { force?: boolean }): Promise<void>` | Remove this volume. Pass `force: true` to remove even if in use. |
+| `reload` | `(): Promise<void>` | Refresh `volume.attrs` from the API. Throws `NotFound` if the volume no longer exists. |
+| `export` | `(): Promise<ArrayBuffer>` | Export the volume contents as a tar archive. |
+| `importTar` | `(data: ArrayBuffer \| Uint8Array): Promise<void>` | Import volume contents from a tar archive. |
+
+The `volume.name` property returns the volume's name string. `volume.id` is an alias for `volume.name`.
+
+---
+
+## Code examples
+
+### Create a named volume
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const volume = await client.volumes.create("my-data");
+console.log("Created volume:", volume.name);
+```
+
+### Create a volume with a custom driver and labels
+
+```typescript
+const volume = await client.volumes.create("app-cache", {
+  driver: "local",
+  driverOpts: {
+    type: "tmpfs",
+    device: "tmpfs",
+  },
+  labels: {
+    env: "production",
+    app: "my-service",
+  },
+});
+
+console.log("Volume:", volume.name);
+```
+
+<Tip>
+  Driver options are passed directly to the underlying storage driver. Consult your driver's documentation for supported keys.
+</Tip>
+
+### List volumes
+
+```typescript
+// List all volumes
+const all = await client.volumes.list();
+
+// List only volumes with a specific label
+const filtered = await client.volumes.list({
+  filters: { label: "env=production" },
+});
+
+for (const vol of filtered) {
+  console.log(vol.name);
+}
+```
+
+### Inspect and remove a volume
+
+```typescript
+const volume = await client.volumes.get("my-data");
+
+// Inspect returns the full Podman API JSON object
+const info = await volume.inspect();
+console.log("Mountpoint:", info.Mountpoint);
+
+// Remove the volume when it's no longer needed
+await volume.remove();
+```
+
+<Note>
+  Removing a volume that is still mounted by a running container will fail unless `force: true` is passed.
+</Note>

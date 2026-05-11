@@ -1,0 +1,310 @@
+---
+title: "Kubernetes YAML support in podman-ts"
+description: "Use KubeManager to generate Kubernetes YAML from containers and pods, apply YAML workloads, and produce systemd unit files with podman-ts."
+---
+
+`KubeManager` bridges Podman and Kubernetes by letting you generate Kubernetes YAML from running containers and pods, apply YAML workloads back into Podman, and produce systemd unit files for any named resource. It is accessible via `client.kube` on any `PodmanClient` instance.
+
+<Note>
+  `KubeManager` does not extend `Manager` and has no `list()` or `get()` method — it is a stateless operation surface, not a resource manager.
+</Note>
+
+## KubeManager methods
+
+### generate
+
+```typescript
+generate(names: string | string[], options?: GenerateKubeOptions): Promise<string>
+```
+
+Generate a Kubernetes YAML manifest from one or more Podman containers or pods. Returns the YAML as a string, ready to write to a file or pass directly to `apply()` or `play()`.
+
+<ParamField body="names" type="string | string[]" required>
+  One or more container or pod names/IDs to include in the generated YAML.
+</ParamField>
+
+<ParamField body="options.pods" type="boolean">
+  Include the pod(s) that own the named containers in the output.
+</ParamField>
+
+<ParamField body="options.replicas" type="number">
+  Set the replica count when the generated resource type is `Deployment`.
+</ParamField>
+
+<ParamField body="options.service" type="boolean">
+  Append a Kubernetes `Service` object alongside the workload resource.
+</ParamField>
+
+<ParamField body="options.type" type="string">
+  Kubernetes resource type to generate (e.g. `"Deployment"`, `"Job"`). Defaults to the Podman API's built-in choice.
+</ParamField>
+
+<ParamField body="options.noTrunc" type="boolean">
+  Do not truncate container/pod IDs in the generated output.
+</ParamField>
+
+---
+
+### generateSystemd
+
+```typescript
+generateSystemd(name: string, options?: GenerateSystemdOptions): Promise<Record<string, string>>
+```
+
+Generate systemd unit files for a named container or pod. Returns a record mapping unit file names to their text content (e.g. `{ "container-myapp.service": "..." }`).
+
+<ParamField body="name" type="string" required>
+  Container or pod name/ID.
+</ParamField>
+
+<ParamField body="options.useName" type="boolean">
+  Use the container/pod name rather than its ID in the generated unit name.
+</ParamField>
+
+<ParamField body="options.new" type="boolean">
+  Generate a unit that creates a new container on start instead of restarting an existing one.
+</ParamField>
+
+<ParamField body="options.noHeader" type="boolean">
+  Omit the comment header from the generated unit file.
+</ParamField>
+
+<ParamField body="options.startTimeout" type="number">
+  `TimeoutStartSec` value in seconds.
+</ParamField>
+
+<ParamField body="options.stopTimeout" type="number">
+  `TimeoutStopSec` value in seconds.
+</ParamField>
+
+<ParamField body="options.restartPolicy" type="string">
+  Systemd `Restart` directive (e.g. `"on-failure"`, `"always"`, `"no"`).
+</ParamField>
+
+<ParamField body="options.containerPrefix" type="string">
+  Prefix for container unit names. Defaults to `"container"`.
+</ParamField>
+
+<ParamField body="options.podPrefix" type="string">
+  Prefix for pod unit names. Defaults to `"pod"`.
+</ParamField>
+
+<ParamField body="options.separator" type="string">
+  Separator between the prefix and the container/pod name (e.g. `"-"` or `"_"`).
+</ParamField>
+
+<ParamField body="options.wants" type="string[]">
+  Additional `Wants=` dependencies to add to the `[Unit]` section.
+</ParamField>
+
+<ParamField body="options.after" type="string[]">
+  Additional `After=` ordering dependencies.
+</ParamField>
+
+<ParamField body="options.requires" type="string[]">
+  Additional `Requires=` hard dependencies.
+</ParamField>
+
+<ParamField body="options.additionalEnvVariables" type="string[]">
+  Extra `Environment=` lines to inject (e.g. `["MY_VAR=value"]`).
+</ParamField>
+
+---
+
+### apply
+
+```typescript
+apply(yaml: string, options?: KubeApplyOptions): Promise<Record<string, unknown>>
+```
+
+Apply a Kubernetes YAML workload to a Podman service or a live Kubernetes cluster (when a kubeconfig is provided). The YAML is sent as the request body.
+
+<ParamField body="yaml" type="string" required>
+  YAML content as a string.
+</ParamField>
+
+<ParamField body="options.caCertFile" type="string">
+  Path to a CA certificate file used for TLS verification against the target cluster.
+</ParamField>
+
+<ParamField body="options.kubeConfig" type="string">
+  Path to a kubeconfig file. When set, the YAML is applied to the configured Kubernetes cluster instead of the local Podman service.
+</ParamField>
+
+<ParamField body="options.namespace" type="string">
+  Kubernetes namespace to apply the resources into.
+</ParamField>
+
+<ParamField body="options.file" type="string">
+  Path at which to save the YAML file on the server before applying.
+</ParamField>
+
+<ParamField body="options.serviceAccount" type="string">
+  Service account name to use when applying the resources.
+</ParamField>
+
+---
+
+### play
+
+```typescript
+play(yaml: string, options?: PlayKubeOptions): Promise<Record<string, unknown>>
+```
+
+Create pods and containers from a Kubernetes YAML file using the local Podman engine (equivalent to `podman play kube`). Returns a summary of created resources.
+
+<ParamField body="yaml" type="string" required>
+  YAML content as a string.
+</ParamField>
+
+<ParamField body="options.annotations" type="Record<string, string>">
+  Annotations to attach to created pods.
+</ParamField>
+
+<ParamField body="options.authFile" type="string">
+  Path to a registry auth file for pulling images.
+</ParamField>
+
+<ParamField body="options.network" type="string[]">
+  Network mode or network names to attach pods to.
+</ParamField>
+
+<ParamField body="options.replace" type="boolean">
+  Tear down and recreate pods that already exist.
+</ParamField>
+
+<ParamField body="options.start" type="boolean">
+  Start pods immediately after creation (default behaviour when omitted).
+</ParamField>
+
+<ParamField body="options.tlsVerify" type="boolean">
+  Verify TLS certificates when pulling images.
+</ParamField>
+
+<ParamField body="options.configMaps" type="string[]">
+  Paths to ConfigMap YAML files to make available during play.
+</ParamField>
+
+<ParamField body="options.build" type="boolean">
+  Build images from Containerfiles referenced in the YAML before running.
+</ParamField>
+
+<ParamField body="options.quiet" type="boolean">
+  Suppress image pull progress output.
+</ParamField>
+
+<ParamField body="options.logDriver" type="string">
+  Log driver for created containers (e.g. `"journald"`, `"k8s-file"`).
+</ParamField>
+
+---
+
+### playDown
+
+```typescript
+playDown(yaml: string, options?: { force?: boolean }): Promise<Record<string, unknown>>
+```
+
+Remove the pods and containers that were created by a previous `play()` call. Pass the same YAML that was used for `play()`. Returns a summary of removed resources.
+
+<ParamField body="yaml" type="string" required>
+  The same YAML string that was passed to `play()`.
+</ParamField>
+
+<ParamField body="options.force" type="boolean">
+  Force removal even if containers are still running.
+</ParamField>
+
+---
+
+## Code examples
+
+### Generate Kubernetes YAML from a container
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const yaml = await client.kube.generate("my-nginx", {
+  service: true,
+  type: "Deployment",
+  replicas: 3,
+});
+
+console.log(yaml);
+// Write to disk if needed:
+await Bun.write("my-nginx.yaml", yaml);
+```
+
+### Generate systemd units for a container
+
+```typescript
+const units = await client.kube.generateSystemd("my-nginx", {
+  useName: true,
+  new: true,
+  restartPolicy: "on-failure",
+  stopTimeout: 10,
+});
+
+for (const [filename, content] of Object.entries(units)) {
+  console.log(`--- ${filename} ---`);
+  console.log(content);
+  await Bun.write(`/etc/systemd/user/${filename}`, content);
+}
+```
+
+<Tip>
+  Set `useName: true` so the generated unit file is named after the container (e.g. `container-my-nginx.service`) rather than its ID, which changes every time the container is recreated.
+</Tip>
+
+### Apply a YAML workload to Podman
+
+```typescript
+import { readFileSync } from "fs";
+
+const yaml = readFileSync("./my-nginx.yaml", "utf8");
+
+const result = await client.kube.apply(yaml, {
+  namespace: "default",
+});
+
+console.log("Applied:", result);
+```
+
+### Apply YAML to a Kubernetes cluster
+
+```typescript
+const result = await client.kube.apply(yaml, {
+  kubeConfig: "/home/user/.kube/config",
+  namespace: "production",
+  caCertFile: "/etc/ssl/certs/cluster-ca.crt",
+});
+
+console.log("Applied to cluster:", result);
+```
+
+### Play a Kubernetes YAML file locally
+
+```typescript
+const yaml = await Bun.file("./my-app.yaml").text();
+
+const result = await client.kube.play(yaml, {
+  replace: true,
+  tlsVerify: true,
+  configMaps: ["./configmap.yaml"],
+});
+
+console.log("Resources created:", result);
+```
+
+### Tear down resources from a previous play
+
+```typescript
+const yaml = await Bun.file("./my-app.yaml").text();
+
+// Uses the same YAML that was passed to play()
+const result = await client.kube.playDown(yaml, { force: true });
+
+console.log("Resources removed:", result);
+```

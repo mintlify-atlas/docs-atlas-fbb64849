@@ -1,0 +1,386 @@
+---
+title: "OCI artifact management with podman-ts"
+description: "Use ArtifactsManager to add files as OCI artifacts, pull from registries, push to destinations, inspect, and extract artifact blobs with podman-ts."
+---
+
+OCI artifacts extend the OCI image specification to store arbitrary data — configuration files, machine learning models, Helm charts, WASM modules, attestations, and more — in the same registries you use for container images. Podman v5 exposes a dedicated artifact API, and `ArtifactsManager` gives you a TypeScript interface over it. Access the manager via `client.artifacts` on any `PodmanClient` instance.
+
+## ArtifactsManager methods
+
+### add
+
+```typescript
+add(
+  name: string,
+  data: ArrayBuffer | Uint8Array,
+  options?: ArtifactAddOptions
+): Promise<Artifact>
+```
+
+Create a new OCI artifact from in-memory data and store it locally. The bytes are sent as the request body with `Content-Type: application/octet-stream`.
+
+<ParamField body="name" type="string" required>
+  Artifact reference (e.g. `"registry.example.com/myorg/mymodel:v1"`).
+</ParamField>
+
+<ParamField body="data" type="ArrayBuffer | Uint8Array" required>
+  Raw file content to store as the artifact blob.
+</ParamField>
+
+<ParamField body="options.annotations" type="Record<string, string>">
+  Annotation key/value pairs to attach to the artifact (serialised as `key=value` entries).
+</ParamField>
+
+<ParamField body="options.artifactType" type="string">
+  OCI media type for the artifact (e.g. `"application/vnd.myorg.config.v1+json"`). When omitted, Podman applies a default type.
+</ParamField>
+
+<ParamField body="options.append" type="boolean">
+  Append the new blob to an existing artifact instead of replacing it.
+</ParamField>
+
+<ParamField body="options.fileTitle" type="string">
+  Value for the `org.opencontainers.image.title` annotation on the blob layer.
+</ParamField>
+
+---
+
+### addLocal
+
+```typescript
+addLocal(
+  name: string,
+  filePath: string,
+  options?: ArtifactAddOptions
+): Promise<Artifact>
+```
+
+Add a local file to an OCI artifact by path. The server reads the file directly from the path you supply rather than requiring you to buffer it in memory first. Accepts the same `ArtifactAddOptions` as `add()`.
+
+<ParamField body="name" type="string" required>
+  Artifact reference.
+</ParamField>
+
+<ParamField body="filePath" type="string" required>
+  Absolute or relative path to the local file.
+</ParamField>
+
+---
+
+### pull
+
+```typescript
+pull(name: string, options?: ArtifactPullOptions): Promise<Artifact>
+```
+
+Pull an artifact from a registry into local storage and return an `Artifact` instance.
+
+<ParamField body="name" type="string" required>
+  Artifact reference to pull (e.g. `"registry.example.com/myorg/mymodel:v1"`).
+</ParamField>
+
+<ParamField body="options.tlsVerify" type="boolean">
+  Verify TLS certificates when connecting to the registry.
+</ParamField>
+
+<ParamField body="options.authFile" type="string">
+  Path to a registry auth file (e.g. `~/.config/containers/auth.json`).
+</ParamField>
+
+<ParamField body="options.quiet" type="boolean">
+  Suppress pull progress output.
+</ParamField>
+
+<ParamField body="options.retry" type="number">
+  Number of times to retry the pull on failure.
+</ParamField>
+
+<ParamField body="options.retryDelay" type="string">
+  Delay between retries as a duration string (e.g. `"2s"`, `"500ms"`).
+</ParamField>
+
+---
+
+### get
+
+```typescript
+get(name: string): Promise<Artifact>
+```
+
+Fetch a locally stored artifact by name. Throws `NotFound` if no artifact with that name exists.
+
+---
+
+### list
+
+```typescript
+list(): Promise<Artifact[]>
+```
+
+Return all locally stored OCI artifacts.
+
+---
+
+### exists
+
+```typescript
+exists(key: string): Promise<boolean>
+```
+
+Return `true` if an artifact with the given name is stored locally, `false` otherwise. Does not throw.
+
+---
+
+### remove
+
+```typescript
+remove(names: string | string[], options?: { all?: boolean }): Promise<Record<string, unknown>>
+```
+
+Remove one or more artifacts from local storage in a single batch call. Returns a summary of removed artifacts.
+
+<ParamField body="names" type="string | string[]" required>
+  One or more artifact names to remove.
+</ParamField>
+
+<ParamField body="options.all" type="boolean">
+  Remove all locally stored artifacts. When `true`, the `names` list is ignored by the API.
+</ParamField>
+
+---
+
+### removeOne
+
+```typescript
+removeOne(name: string): Promise<void>
+```
+
+Remove a single artifact by name using a dedicated endpoint (`DELETE /artifacts/{name}`). Throws `NotFound` if the artifact does not exist.
+
+---
+
+## Artifact instance methods
+
+An `Artifact` object is returned by `add()`, `addLocal()`, `pull()`, `get()`, and `list()`. It exposes:
+
+### inspect
+
+```typescript
+inspect(): Promise<Record<string, unknown>>
+```
+
+Return the full JSON inspect object for this artifact from the Podman API.
+
+---
+
+### extract
+
+```typescript
+extract(options?: { title?: string; digest?: string }): Promise<ArrayBuffer>
+```
+
+Download the artifact's blob content as an `ArrayBuffer`.
+
+<ParamField body="options.title" type="string">
+  Extract only the blob whose `org.opencontainers.image.title` annotation matches this value.
+</ParamField>
+
+<ParamField body="options.digest" type="string">
+  Extract only the blob with this specific digest.
+</ParamField>
+
+---
+
+### push
+
+```typescript
+push(options?: {
+  destination?: string;
+  tlsVerify?: boolean;
+  authFile?: string;
+  quiet?: boolean;
+}): Promise<void>
+```
+
+Push this artifact to a registry.
+
+<ParamField body="options.destination" type="string">
+  Override the push destination. When omitted, the artifact's own name is used as the registry reference.
+</ParamField>
+
+<ParamField body="options.tlsVerify" type="boolean">
+  Verify TLS certificates when connecting to the registry.
+</ParamField>
+
+<ParamField body="options.authFile" type="string">
+  Path to a registry auth file.
+</ParamField>
+
+<ParamField body="options.quiet" type="boolean">
+  Suppress push progress output.
+</ParamField>
+
+---
+
+### remove
+
+```typescript
+remove(): Promise<void>
+```
+
+Delete this artifact from local storage. Throws `NotFound` if the artifact no longer exists.
+
+---
+
+### reload
+
+```typescript
+reload(): Promise<void>
+```
+
+Refresh this instance's `attrs` from the Podman API.
+
+---
+
+### Artifact instance properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Artifact reference string. |
+| `id` | `string \| undefined` | Digest of the artifact (`Digest` field from inspect). |
+
+---
+
+## Code examples
+
+### Add a file as an OCI artifact
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const fileBytes = await Bun.file("./model-weights.bin").arrayBuffer();
+
+const artifact = await client.artifacts.add(
+  "registry.example.com/myorg/mymodel:v1",
+  fileBytes,
+  {
+    artifactType: "application/vnd.myorg.model.weights.v1",
+    annotations: {
+      "org.opencontainers.image.description": "ResNet-50 weights",
+    },
+    fileTitle: "model-weights.bin",
+  },
+);
+
+console.log("Artifact created:", artifact.name);
+```
+
+### Add a local file by path
+
+```typescript
+const artifact = await client.artifacts.addLocal(
+  "registry.example.com/myorg/config:latest",
+  "/etc/myapp/config.json",
+  { fileTitle: "config.json" },
+);
+
+console.log("Added from local path:", artifact.name);
+```
+
+<Tip>
+  Use `addLocal()` instead of `add()` when the file is large — it avoids buffering the entire file into memory in your process.
+</Tip>
+
+### Pull an artifact from a registry
+
+```typescript
+const artifact = await client.artifacts.pull(
+  "registry.example.com/myorg/mymodel:v1",
+  {
+    tlsVerify: true,
+    quiet: false,
+    retry: 3,
+    retryDelay: "2s",
+  },
+);
+
+console.log("Pulled artifact:", artifact.name, "digest:", artifact.id);
+```
+
+### List and inspect artifacts
+
+```typescript
+const artifacts = await client.artifacts.list();
+
+for (const artifact of artifacts) {
+  const info = await artifact.inspect();
+  console.log(artifact.name, info);
+}
+```
+
+### Extract artifact content
+
+```typescript
+const artifact = await client.artifacts.get("registry.example.com/myorg/mymodel:v1");
+
+// Extract a specific blob by its title annotation
+const buffer = await artifact.extract({ title: "model-weights.bin" });
+
+await Bun.write("./downloaded-weights.bin", buffer);
+console.log("Extracted", buffer.byteLength, "bytes.");
+```
+
+### Extract a specific blob by digest
+
+```typescript
+const buffer = await artifact.extract({
+  digest: "sha256:abc123def456",
+});
+
+await Bun.write("./blob.bin", buffer);
+```
+
+### Push an artifact to a registry
+
+```typescript
+const artifact = await client.artifacts.get("registry.example.com/myorg/mymodel:v1");
+
+await artifact.push({
+  tlsVerify: true,
+  authFile: "/home/user/.config/containers/auth.json",
+  quiet: true,
+});
+
+console.log("Artifact pushed.");
+```
+
+### Push to a different destination
+
+```typescript
+// Push the same artifact to a staging registry
+await artifact.push({
+  destination: "staging.registry.example.com/myorg/mymodel:v1",
+  tlsVerify: false,
+});
+```
+
+### Remove artifacts
+
+```typescript
+// Remove a single artifact
+await client.artifacts.removeOne("registry.example.com/myorg/mymodel:v1");
+
+// Remove multiple artifacts in one call
+const result = await client.artifacts.remove([
+  "registry.example.com/myorg/mymodel:v1",
+  "registry.example.com/myorg/config:latest",
+]);
+
+console.log("Removed:", result);
+```
+
+<Warning>
+  Removing an artifact from local storage does not delete it from the registry. Use the registry's own API or UI to remove remote artifacts.
+</Warning>

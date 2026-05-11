@@ -1,0 +1,353 @@
+---
+title: "Managing images with podman-ts"
+description: "Use ImagesManager to pull, push, build from a Dockerfile, search registries, tag, and inspect container images with the podman-ts TypeScript SDK."
+---
+
+`ImagesManager` provides a high-level interface for working with OCI and Docker container images. It is accessible via `client.images` on any `PodmanClient` instance and covers the full image lifecycle including pulling from registries, building from a Dockerfile context, pushing, tagging, and removal.
+
+## ImagesManager methods
+
+### list
+
+```typescript
+list(options?: ImageListOptions): Promise<Image[]>
+```
+
+List images stored locally.
+
+<ParamField body="options.name" type="string">
+  Filter by image reference. Internally mapped to the `reference` filter parameter.
+</ParamField>
+
+<ParamField body="options.all" type="boolean">
+  Include intermediate build layers.
+</ParamField>
+
+<ParamField body="options.filters" type="Record<string, string | string[]>">
+  Additional key/value filters (e.g. `{ dangling: "true" }`).
+</ParamField>
+
+---
+
+### get
+
+```typescript
+get(name: string): Promise<Image>
+```
+
+Inspect a local image by name or ID. Returns an `Image` instance. Throws `ImageNotFound` if the image does not exist.
+
+---
+
+### pull
+
+```typescript
+pull(repository: string, options?: ImagePullOptions): Promise<Image>
+```
+
+Pull an image from a registry. Returns the pulled `Image` instance.
+
+<ParamField body="options.tag" type="string">
+  Tag to pull (e.g. `"latest"`). When set, the full reference becomes `repository:tag`.
+</ParamField>
+
+<ParamField body="options.allTags" type="boolean">
+  Pull all tags for the repository.
+</ParamField>
+
+<ParamField body="options.quiet" type="boolean">
+  Suppress progress output.
+</ParamField>
+
+<ParamField body="options.tlsVerify" type="boolean">
+  Verify TLS certificates for the registry. Set to `false` for insecure registries.
+</ParamField>
+
+---
+
+### push
+
+```typescript
+push(repository: string, options?: ImagePushOptions): Promise<void>
+```
+
+Push an image to a registry. The image must already be tagged with the destination reference.
+
+<ParamField body="options.tag" type="string">
+  Specific tag to push.
+</ParamField>
+
+<ParamField body="options.tlsVerify" type="boolean">
+  Verify TLS certificates for the destination registry.
+</ParamField>
+
+---
+
+### build
+
+```typescript
+build(options: BuildOptions): Promise<{ image: Image; logs: string[] }>
+```
+
+Build an image from a Dockerfile context directory. The context is packaged into a tar archive using `Bun.spawn(["tar", ...])` and POSTed to `/build`.
+
+<Note>
+  `build()` uses `Bun.spawn` to create the tar archive. This method requires the Bun runtime and will not work under Node.js.
+</Note>
+
+Returns `{ image, logs }` where `image` is the resulting `Image` instance and `logs` is the raw build output split by line.
+
+See [BuildOptions](#buildoptions) below for the full list of parameters.
+
+---
+
+### search
+
+```typescript
+search(term: string, options?: ImageSearchOptions): Promise<Record<string, unknown>[]>
+```
+
+Search configured registries for images matching the given term.
+
+<ParamField body="options.limit" type="number">
+  Maximum number of results to return.
+</ParamField>
+
+<ParamField body="options.filters" type="Record<string, string>">
+  Search filters (e.g. `{ "is-official": "true" }`).
+</ParamField>
+
+<ParamField body="options.tlsVerify" type="boolean">
+  Verify TLS for registry connections.
+</ParamField>
+
+<ParamField body="options.listTags" type="boolean">
+  Include available tags in results.
+</ParamField>
+
+---
+
+### exists
+
+```typescript
+exists(name: string): Promise<boolean>
+```
+
+Return `true` if an image with the given name or ID is present locally, `false` otherwise.
+
+---
+
+### remove
+
+```typescript
+remove(name: string, options?: { force?: boolean }): Promise<Record<string, unknown>[]>
+```
+
+Remove an image by name or ID. Returns a list of untagged/deleted layer records. Throws `ImageNotFound` if the image does not exist.
+
+<ParamField body="options.force" type="boolean">
+  Force removal even if the image is in use by a container.
+</ParamField>
+
+---
+
+### prune
+
+```typescript
+prune(options?: { all?: boolean; filters?: Record<string, string> }): Promise<Record<string, unknown>>
+```
+
+Remove unused images and reclaim disk space.
+
+<ParamField body="options.all" type="boolean">
+  Remove all unused images, not just dangling ones.
+</ParamField>
+
+<ParamField body="options.filters" type="Record<string, string>">
+  Prune filters (e.g. `{ until: "24h" }`).
+</ParamField>
+
+---
+
+## Image instance methods
+
+An `Image` object is returned by `get()`, `pull()`, and `build()`, and each element of `list()`.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `history` | `(): Promise<Record<string, unknown>[]>` | Return the layer history of the image. |
+| `tag` | `(repository: string, tag?: string): Promise<boolean>` | Add a tag to the image. |
+| `remove` | `(options?: { force?: boolean }): Promise<Record<string, unknown>[]>` | Remove the image. |
+| `reload` | `(): Promise<void>` | Refresh `image.attrs` from the API (equivalent to re-inspecting). |
+
+**Accessor properties:** `image.id`, `image.tags` (filtered `RepoTags`), `image.labels`.
+
+<Note>
+  There is no standalone `inspect()` method on an `Image` instance. Use `client.images.get(name)` for fresh inspect data, or call `image.reload()` to update the instance's cached attributes in place.
+</Note>
+
+---
+
+## BuildOptions
+
+Full reference for options accepted by `client.images.build()`:
+
+<ParamField body="path" type="string" required>
+  Absolute path to the build context directory. The entire directory is packaged as a tar and sent to the daemon.
+</ParamField>
+
+<ParamField body="dockerfile" type="string" default='"Dockerfile"'>
+  Dockerfile/Containerfile name relative to `path`.
+</ParamField>
+
+<ParamField body="tag" type="string">
+  Name and optionally a tag for the resulting image (e.g. `"myapp:v1"`).
+</ParamField>
+
+<ParamField body="buildargs" type="Record<string, string>">
+  Build-time variables passed as `--build-arg` (e.g. `{ VERSION: "1.2.3" }`).
+</ParamField>
+
+<ParamField body="target" type="string">
+  Target build stage in a multi-stage Dockerfile.
+</ParamField>
+
+<ParamField body="nocache" type="boolean">
+  Disable the layer cache.
+</ParamField>
+
+<ParamField body="pull" type="boolean">
+  Always attempt to pull a newer version of base images.
+</ParamField>
+
+<ParamField body="rm" type="boolean">
+  Remove intermediate containers after a successful build.
+</ParamField>
+
+<ParamField body="forcerm" type="boolean">
+  Always remove intermediate containers, even on failure.
+</ParamField>
+
+<ParamField body="quiet" type="boolean">
+  Suppress build output.
+</ParamField>
+
+<ParamField body="platform" type="string">
+  Target platform (e.g. `"linux/arm64"`).
+</ParamField>
+
+<ParamField body="networkMode" type="string">
+  Network mode for the build container (e.g. `"host"`, `"none"`).
+</ParamField>
+
+<ParamField body="squash" type="boolean">
+  Squash all layers into a single layer.
+</ParamField>
+
+<ParamField body="cacheFrom" type="string[]">
+  Images to use as cache sources.
+</ParamField>
+
+<ParamField body="extraHosts" type="Record<string, string>">
+  Additional host-to-IP mappings for the build container.
+</ParamField>
+
+<ParamField body="labels" type="Record<string, string>">
+  Labels applied to the resulting image.
+</ParamField>
+
+<ParamField body="secrets" type="string[]">
+  Secret IDs to expose during the build.
+</ParamField>
+
+<ParamField body="shmsize" type="number">
+  Size of `/dev/shm` in bytes.
+</ParamField>
+
+<ParamField body="layers" type="boolean" default="true">
+  Cache intermediate layers.
+</ParamField>
+
+<ParamField body="httpProxy" type="boolean">
+  Pass `HTTP_PROXY`/`HTTPS_PROXY` environment variables to the build.
+</ParamField>
+
+<ParamField body="manifest" type="string">
+  Add the built image to the named manifest list.
+</ParamField>
+
+<ParamField body="containerLimits" type="object">
+  Resource limits for the build container.
+
+  <Expandable title="containerLimits fields">
+    <ParamField body="memory" type="number">Memory limit in bytes.</ParamField>
+    <ParamField body="memswap" type="number">Memory + swap limit in bytes.</ParamField>
+    <ParamField body="cpushares" type="number">CPU shares (relative weight).</ParamField>
+    <ParamField body="cpusetcpus" type="string">CPUs to use (e.g. `"0-3"`).</ParamField>
+    <ParamField body="cpuperiod" type="number">CPU CFS period in microseconds.</ParamField>
+    <ParamField body="cpuquota" type="number">CPU CFS quota in microseconds.</ParamField>
+  </Expandable>
+</ParamField>
+
+---
+
+## Code examples
+
+### Pull an image
+
+```typescript
+import { PodmanClient } from "@pratyay360/podman-ts";
+
+const client = new PodmanClient();
+
+const image = await client.images.pull("docker.io/library/nginx", { tag: "latest" });
+console.log("Pulled:", image.tags);
+```
+
+### Build from a Dockerfile context directory
+
+```typescript
+const { image, logs } = await client.images.build({
+  path: "/home/user/myapp",
+  dockerfile: "Dockerfile",
+  tag: "myapp:dev",
+  buildargs: { NODE_ENV: "production" },
+  nocache: true,
+});
+
+console.log("Built image ID:", image.id);
+console.log("Build log lines:", logs.length);
+```
+
+### Push to a registry
+
+```typescript
+// Tag the image with the destination reference first.
+const image = await client.images.get("myapp:dev");
+await image.tag("registry.example.com/myorg/myapp", "v1.0.0");
+
+// Then push.
+await client.images.push("registry.example.com/myorg/myapp", { tag: "v1.0.0" });
+```
+
+### Search registries
+
+```typescript
+const results = await client.images.search("nginx", {
+  limit: 10,
+  filters: { "is-official": "true" },
+});
+
+for (const result of results) {
+  console.log(result["Name"], result["Description"]);
+}
+```
+
+### List local images
+
+```typescript
+const images = await client.images.list({ name: "nginx" });
+for (const img of images) {
+  console.log(img.id, img.tags.join(", "));
+}
+```
